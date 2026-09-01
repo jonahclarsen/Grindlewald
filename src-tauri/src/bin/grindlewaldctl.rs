@@ -34,6 +34,9 @@ enum CliCommand {
     /// Set a dedicated-white color, such as #ffd5ad.
     White {
         value: String,
+        /// Native color temperature for H6005 lights (2000-9000 K).
+        #[arg(long, value_parser = clap::value_parser!(u16).range(2000..=9000))]
+        kelvin: Option<u16>,
         #[arg(short, long)]
         brightness: Option<f32>,
         #[arg(short, long)]
@@ -57,6 +60,13 @@ enum CliCommand {
         #[arg(short, long)]
         light: Option<String>,
     },
+    /// Start a locally streamed rainbow party mode.
+    Party {
+        #[arg(short, long)]
+        light: Option<String>,
+    },
+    /// Stop party mode and restore the selected static color.
+    StopParty,
 }
 
 #[tokio::main]
@@ -74,10 +84,12 @@ async fn main() -> anyhow::Result<()> {
         },
         CliCommand::White {
             value,
+            kelvin,
             brightness,
             light,
         } => ControlCommand::White {
             value,
+            kelvin,
             brightness,
             device: light,
         },
@@ -93,6 +105,8 @@ async fn main() -> anyhow::Result<()> {
             name,
             device: light,
         },
+        CliCommand::Party { light } => ControlCommand::Party { device: light },
+        CliCommand::StopParty => ControlCommand::StopParty,
     };
 
     let path = socket_path();

@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::{
     command::ControlCommand,
     protocol::{
-        CONTROL_CHARACTERISTIC, brightness_frame, color_frame, parse_hex_color, power_frame,
-        white_frame,
+        CONTROL_CHARACTERISTIC, brightness_frame, color_frame, keep_alive_frame, parse_hex_color,
+        party_frames, power_frame, white_frame,
     },
     settings::{DeviceConfig, Settings},
 };
@@ -26,6 +26,12 @@ pub struct DiscoveredDevice {
 pub struct BleController {
     adapter: Option<Adapter>,
     connections: HashMap<String, Peripheral>,
+}
+
+impl Default for BleController {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BleController {
@@ -107,7 +113,7 @@ impl BleController {
         if selected.is_empty() {
             return Err(match command.device() {
                 Some(name) => format!("no enabled device named {name:?}"),
-                None => "no enabled lights are configured; add one in Settings".into(),
+                None => "No lights connected.".into(),
             });
         }
 
@@ -226,6 +232,27 @@ impl BleController {
         }))
         .await;
     }
+
+    pub async fn keep_alive(&mut self) {
+        let Ok(characteristic_uuid) = Uuid::parse_str(CONTROL_CHARACTERISTIC) else {
+            return;
+        };
+        let frame = keep_alive_frame();
+        for peripheral in self.connections.values() {
+            if !peripheral.is_connected().await.unwrap_or(false) {
+                continue;
+            }
+            if let Some(characteristic) = peripheral
+                .characteristics()
+                .into_iter()
+                .find(|characteristic| characteristic.uuid == characteristic_uuid)
+            {
+                let _ = peripheral
+                    .write(&characteristic, &frame, WriteType::WithoutResponse)
+                    .await;
+            }
+        }
+    }
 }
 
 async fn find_peripheral(peripherals: &[Peripheral], device: &DeviceConfig) -> Option<Peripheral> {
@@ -269,9 +296,12 @@ fn frames_for(
             Ok(frames)
         }
         ControlCommand::White {
-            value, brightness, ..
+            value,
+            kelvin,
+            brightness,
+            ..
         } => {
-            let mut frames = vec![white_frame(profile, parse_hex_color(value)?)];
+            let mut frames = vec![white_frame(profile, parse_hex_color(value)?, *kelvin)];
             if let Some(brightness) = brightness {
                 frames.push(brightness_frame(*brightness)?);
             }
@@ -281,6 +311,12 @@ fn frames_for(
         ControlCommand::Power { on, .. } => Ok(vec![power_frame(*on)]),
         ControlCommand::Preset { .. } => {
             Err("preset commands must be resolved before reaching Bluetooth".into())
+        }
+        ControlCommand::Party { .. } | ControlCommand::StopParty => {
+            Err("party commands must be resolved before reaching Bluetooth".into())
+        }
+        ControlCommand::PartyFrame { value, enter, .. } => {
+            Ok(party_frames(profile, parse_hex_color(value)?, *enter))
         }
     }
 }

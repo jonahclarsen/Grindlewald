@@ -13,13 +13,16 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Native macOS menu-bar popover that anchors under its icon and hides when it loses focus
 - A custom click-and-drag hue control for RGB mode and warm-to-cool slider for dedicated-white mode
 - Dragging either control switches light mode immediately
-- BLE connections remain open for six seconds after activity, making follow-up color changes fast
+- Configurable BLE connection hold time, making follow-up color changes fast
+- Native H6005 white-temperature packets from 2000–9000 K
+- A locally streamed rainbow party mode with instant H6005 transitions
 - Named color presets shared by the UI, CLI, and automations
 - Bluetooth discovery plus add, edit, enable, and remove controls for individual lights; existing matches remain visible and are labeled as already added
 - Bluetooth identifiers are displayed and stored in uppercase but matched case-insensitively for discovery and live connections
 - Daily local-time automations targeting one, several, or all enabled lights
 - Optional trusted shell command run alongside an automation, with a full Test button
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too
+- Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, and Escape to dismiss
 
 ## Setup
 
@@ -30,10 +33,10 @@ pnpm install
 pnpm tauri dev
 ```
 
-Click the **G** menu-bar icon, open **Settings**, and choose **Discover**. Add each light and select its protocol:
+Click the **G** menu-bar icon, open **Settings**, and choose **Discover**. Grindlewald chooses H6005 automatically when the advertised device name contains `H6005`; every other discovered light defaults to Classic. You can override the protocol at any time:
 
 - **H6005** for H6005-series devices
-- **Classic** for the older Govee BLE packet mode
+- **Classic (H6001)** for the older Govee BLE packet mode
 
 macOS will ask for Bluetooth permission the first time Grindlewald scans or connects. Device names and CoreBluetooth identifiers are saved to:
 
@@ -61,17 +64,23 @@ grindlewaldctl preset nighttime --light "Studio lamp"
 # Direct RGB and dedicated-white colors
 grindlewaldctl color '#ff4500' --brightness 0.35
 grindlewaldctl white '#ffd5ad' --brightness 0.7 --light Bedroom
+grindlewaldctl white '#ffa957' --kelvin 2700 --light Bedroom
+
+# Stream or stop a rainbow party effect
+grindlewaldctl party
+grindlewaldctl party --light Bedroom
+grindlewaldctl stop-party
 
 # Brightness and power
 grindlewaldctl brightness 0.2
 grindlewaldctl power off --light Bedroom
 ```
 
-Brightness values range from `0.0` through `1.0`. Preset and light names are case-insensitive at execution time. You can add and edit presets on the **Presets** page.
+Brightness values range from `0.0` through `1.0`. Preset and light names are case-insensitive at execution time. You can add and edit presets in **Settings**.
 
 ## Automations
 
-On **Timers**, create an automation, choose its daily local time and preset, then select any number of lights. Selecting no lights means all enabled lights. The scheduler runs inside the menu-bar process, so keep Grindlewald running.
+On **Automations**, create an automation, choose its daily local time and preset, then select any number of lights. Selecting no lights means all enabled lights. The scheduler runs inside the menu-bar process, so keep Grindlewald running.
 
 An automation may also run a shell command through `/bin/zsh -lc`. The command is stored only in the local settings file. Use this only for commands you trust; it intentionally has the same permissions as your user account. **Test light + script now** saves the automation and runs both halves immediately.
 
@@ -95,7 +104,20 @@ Remove it with:
 
 ## How the light protocol works
 
-Grindlewald follows the same direct-BLE packet logic as the scripts that preceded it. Commands are padded to 19 bytes and followed by an XOR checksum. RGB mode uses manual mode `0x02` (or `0x0d` for H6005), while dedicated-white mode sets the white-channel flag and includes the selected white hue. Color and brightness writes are sent together to all selected lights.
+Grindlewald follows the same direct-BLE packet logic as the scripts that preceded it. Commands are padded to 19 bytes and followed by an XOR checksum. Writes use the Govee control characteristic and are sent without a response.
+
+The two profiles deliberately encode white differently:
+
+- **Classic / H6001:** mode `0x02`, `FF FF FF`, a dedicated-white flag, then the selected white RGB value.
+- **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
+
+The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Classic lights receive rapid `0x02` RGB frames. Choosing any normal control stops the effect; **Stop party mode** restores the currently selected static color.
+
+While the configured connection window is active, Grindlewald sends the captured `AA 01 … AB` no-op every two seconds. This keeps H6005 links alive beyond their roughly 15-second idle timeout without changing light state.
+
+Protocol references: [H6005 write-up](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6005.md), [captured H6004/H6005 command set](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6004.md), [H6001/H6127 command set and scenes](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6127.md), and [classic H6001 controller](https://github.com/chvolkmann/govee_btled).
+
+H6001 has documented built-in music, scene, and DIY packets. H6005 has confirmed instant music streaming but its scene and DIY payloads remain undocumented, so Grindlewald does not send guessed scene packets. Its local party stream is predictable on both supported profiles.
 
 ## Privacy and repository safety
 

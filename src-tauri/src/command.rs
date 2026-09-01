@@ -10,6 +10,8 @@ pub enum ControlCommand {
     },
     White {
         value: String,
+        #[serde(default)]
+        kelvin: Option<u16>,
         brightness: Option<f32>,
         device: Option<String>,
     },
@@ -25,6 +27,15 @@ pub enum ControlCommand {
         name: String,
         device: Option<String>,
     },
+    Party {
+        device: Option<String>,
+    },
+    StopParty,
+    PartyFrame {
+        value: String,
+        enter: bool,
+        device: Option<String>,
+    },
 }
 
 impl ControlCommand {
@@ -34,7 +45,10 @@ impl ControlCommand {
             | Self::White { device, .. }
             | Self::Brightness { device, .. }
             | Self::Power { device, .. }
-            | Self::Preset { device, .. } => device.as_deref(),
+            | Self::Preset { device, .. }
+            | Self::Party { device }
+            | Self::PartyFrame { device, .. } => device.as_deref(),
+            Self::StopParty => None,
         }
     }
 }

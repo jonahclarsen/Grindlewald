@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -17,13 +17,13 @@ use crate::{
     settings::{self, LightMode, Schedule, Settings},
 };
 
-const LIVE_CONNECTION_WINDOW: Duration = Duration::from_secs(6);
-
 #[derive(Clone)]
 pub struct SharedState {
     controller: Arc<Mutex<BleController>>,
     settings_path: Arc<PathBuf>,
     activity_generation: Arc<AtomicU64>,
+    party_generation: Arc<AtomicU64>,
+    party_active: Arc<AtomicBool>,
 }
 
 impl SharedState {
@@ -32,6 +32,8 @@ impl SharedState {
             controller: Arc::new(Mutex::new(BleController::new())),
             settings_path: Arc::new(settings_path),
             activity_generation: Arc::new(AtomicU64::new(0)),
+            party_generation: Arc::new(AtomicU64::new(0)),
+            party_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -52,6 +54,14 @@ impl SharedState {
     }
 
     pub async fn execute(&self, command: ControlCommand) -> Result<String, String> {
+        if let ControlCommand::Party { device } = &command {
+            return self.start_party(device.clone()).await;
+        }
+        if matches!(command, ControlCommand::StopParty) {
+            return self.stop_party().await;
+        }
+        self.party_active.store(false, Ordering::SeqCst);
+        self.party_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
         let command = resolve_preset(&settings, command)?;
         let result = self
@@ -60,8 +70,87 @@ impl SharedState {
             .await
             .apply(&settings, &command)
             .await;
-        self.arm_idle_disconnect();
+        self.arm_idle_disconnect(settings.connection_hold_seconds);
         result
+    }
+
+    async fn start_party(&self, device: Option<String>) -> Result<String, String> {
+        if self.party_active.swap(true, Ordering::SeqCst) {
+            return Ok("Party mode is already running".into());
+        }
+        let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.activity_generation.fetch_add(1, Ordering::SeqCst);
+        let settings = self.load_settings()?;
+        if let Err(error) = self
+            .controller
+            .lock()
+            .await
+            .apply(
+                &settings,
+                &ControlCommand::PartyFrame {
+                    value: "#ff3040".into(),
+                    enter: true,
+                    device: device.clone(),
+                },
+            )
+            .await
+        {
+            self.party_active.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+
+        let state = self.clone();
+        tauri::async_runtime::spawn(async move {
+            const COLORS: [&str; 12] = [
+                "#ff3040", "#ff7a21", "#ffd52b", "#7cff31", "#24e6a8", "#23d7ff", "#2670ff",
+                "#673cff", "#b72cff", "#ff2bba", "#ff315e", "#ff3040",
+            ];
+            let mut color_index = 1;
+            loop {
+                tokio::time::sleep(Duration::from_millis(180)).await;
+                if state.party_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let command = ControlCommand::PartyFrame {
+                    value: COLORS[color_index].into(),
+                    enter: false,
+                    device: device.clone(),
+                };
+                if state
+                    .controller
+                    .lock()
+                    .await
+                    .apply(&settings, &command)
+                    .await
+                    .is_err()
+                {
+                    state.party_generation.fetch_add(1, Ordering::SeqCst);
+                    state.party_active.store(false, Ordering::SeqCst);
+                    break;
+                }
+                color_index = (color_index + 1) % COLORS.len();
+            }
+        });
+        Ok("Party mode started".into())
+    }
+
+    async fn stop_party(&self) -> Result<String, String> {
+        self.party_active.store(false, Ordering::SeqCst);
+        self.party_generation.fetch_add(1, Ordering::SeqCst);
+        let settings = self.load_settings()?;
+        let command = ControlCommand::Color {
+            value: settings.color.clone(),
+            brightness: Some(settings.brightness),
+            device: None,
+        };
+        let result = self
+            .controller
+            .lock()
+            .await
+            .apply(&settings, &command)
+            .await;
+        self.arm_idle_disconnect(settings.connection_hold_seconds);
+        result.map(|_| "Party mode stopped".into())
     }
 
     pub async fn run_schedule_by_id(&self, id: &str) -> Result<String, String> {
@@ -125,13 +214,22 @@ impl SharedState {
         }
     }
 
-    fn arm_idle_disconnect(&self) {
+    fn arm_idle_disconnect(&self, hold_seconds: u64) {
         let generation = self.activity_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(LIVE_CONNECTION_WINDOW).await;
-            if state.activity_generation.load(Ordering::SeqCst) == generation {
-                state.controller.lock().await.disconnect_all().await;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(hold_seconds);
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                tokio::time::sleep(remaining.min(Duration::from_secs(2))).await;
+                if state.activity_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    state.controller.lock().await.disconnect_all().await;
+                    break;
+                }
+                state.controller.lock().await.keep_alive().await;
             }
         });
     }
@@ -186,6 +284,7 @@ fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<Contro
         },
         LightMode::White => ControlCommand::White {
             value: preset.value.clone(),
+            kelvin: None,
             brightness: Some(preset.brightness),
             device,
         },

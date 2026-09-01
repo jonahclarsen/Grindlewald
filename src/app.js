@@ -9,6 +9,7 @@ const demoSettings = {
   color: "#ff4f22",
   white: "#ffd5ad",
   brightness: 0.4,
+  connectionHoldSeconds: 6,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -25,6 +26,7 @@ let settings;
 let discovered = [];
 let pendingControl = null;
 let sendingControl = false;
+let partyActive = false;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
@@ -32,6 +34,7 @@ const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => (
 })[character]);
 const canonicalIdentifier = (value) => String(value).trim().toLocaleUpperCase();
 const normalizeIdentifier = canonicalIdentifier;
+const protocolForDeviceName = (name) => String(name).toLocaleLowerCase().includes("h6005") ? "h6005" : "classic";
 const configuredDeviceFor = (discoveredDevice) => settings.devices.find(
   (configuredDevice) => normalizeIdentifier(configuredDevice.identifier) === normalizeIdentifier(discoveredDevice.identifier),
 );
@@ -72,13 +75,25 @@ function mixRgb(start, end, amount) {
   return start.map((channel, index) => channel + (end[index] - channel) * amount);
 }
 
+const whiteAnchors = [
+  [2000, [255, 141, 11]],
+  [2700, [255, 169, 87]],
+  [5500, [255, 238, 222]],
+  [7500, [238, 239, 255]],
+  [9000, [217, 225, 255]],
+];
+
+function kelvinAtPosition(position) {
+  return Math.round(2000 + Math.max(0, Math.min(1, position)) * 7000);
+}
+
 function whiteAtPosition(position) {
-  const warm = [255, 141, 11];
-  const neutral = [255, 238, 222];
-  const cool = [214, 225, 255];
-  return position <= 0.5
-    ? rgbToHex(mixRgb(warm, neutral, position * 2))
-    : rgbToHex(mixRgb(neutral, cool, (position - 0.5) * 2));
+  const kelvin = kelvinAtPosition(position);
+  const upperIndex = whiteAnchors.findIndex(([anchorKelvin]) => anchorKelvin >= kelvin);
+  if (upperIndex <= 0) return rgbToHex(whiteAnchors[0][1]);
+  const [upperKelvin, upperRgb] = whiteAnchors[upperIndex];
+  const [lowerKelvin, lowerRgb] = whiteAnchors[upperIndex - 1];
+  return rgbToHex(mixRgb(lowerRgb, upperRgb, (kelvin - lowerKelvin) / (upperKelvin - lowerKelvin)));
 }
 
 function whitePositionFromHex(value) {
@@ -99,7 +114,7 @@ function whitePositionFromHex(value) {
 function updateHue(hue, shouldSend = true) {
   const normalizedHue = ((hue % 360) + 360) % 360;
   settings.color = colorAtHue(normalizedHue);
-  $("#hue-knob").style.left = `${normalizedHue / 360 * 100}%`;
+  $("#hue-knob").style.setProperty("--knob-position", `${normalizedHue / 360 * 100}%`);
   $("#color-swatch").style.background = settings.color;
   $("#hue-track").setAttribute("aria-valuenow", String(Math.round(normalizedHue)));
   if (shouldSend) queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
@@ -108,10 +123,10 @@ function updateHue(hue, shouldSend = true) {
 function updateWhite(position, shouldSend = true) {
   const normalizedPosition = Math.max(0, Math.min(1, position));
   settings.white = whiteAtPosition(normalizedPosition);
-  $("#white-knob").style.left = `${normalizedPosition * 100}%`;
+  $("#white-knob").style.setProperty("--knob-position", `${normalizedPosition * 100}%`);
   $("#white-swatch").style.background = settings.white;
   $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
-  if (shouldSend) queueControl({ command: "white", value: settings.white, brightness: settings.brightness, device: null });
+  if (shouldSend) queueControl({ command: "white", value: settings.white, kelvin: kelvinAtPosition(normalizedPosition), brightness: settings.brightness, device: null });
 }
 
 function makeDraggable(track, update) {
@@ -137,6 +152,16 @@ function setStatus(message, kind = "ready") {
   $("#connection-dot").className = kind === "ready" ? "" : kind;
 }
 
+function setDiscoveryBusy(isBusy) {
+  const button = $("#discover-button");
+  button.disabled = isBusy;
+  button.innerHTML = isBusy ? '<span class="spinner"></span>Scanning…' : "Discover";
+  button.setAttribute("aria-busy", String(isBusy));
+  if (isBusy) {
+    $("#discovered-devices").innerHTML = '<div class="discovery-progress"><span class="spinner"></span><span>Looking for nearby lights…</span></div>';
+  }
+}
+
 async function call(command, args = {}) {
   if (demoMode) {
     if (command === "get_settings") return structuredClone(demoSettings);
@@ -159,6 +184,7 @@ async function save() {
 }
 
 async function queueControl(command) {
+  setPartyActive(false);
   pendingControl = command;
   if (sendingControl) return;
   sendingControl = true;
@@ -174,6 +200,14 @@ async function queueControl(command) {
     }
   }
   sendingControl = false;
+}
+
+function setPartyActive(active) {
+  partyActive = active;
+  const button = $("#party-button");
+  button.classList.toggle("active", active);
+  button.setAttribute("aria-pressed", String(active));
+  button.textContent = active ? "Stop party mode" : "Start party mode";
 }
 
 function showPage(pageId) {
@@ -230,16 +264,16 @@ function renderDevices() {
       <div class="card-title"><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><button class="remove-button" data-remove-device="${index}">Remove</button></div>
       <div class="field-grid">
         <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
-        <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
+        <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic (H6001)</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
         <label class="field full">Bluetooth identifier<input class="identifier-input" data-device-field="identifier" value="${escapeHtml(canonicalIdentifier(device.identifier))}" spellcheck="false"></label>
       </div>
-    </article>`).join("") : '<div class="empty">No lights configured. Click Discover to find nearby Govee lights.</div>';
+    </article>`).join("") : '<div class="empty">No lights connected.</div>';
 
   $("#discovered-devices").innerHTML = discovered.map((device, index) => {
     const configuredDevice = configuredDeviceFor(device);
     const detail = configuredDevice
       ? `<small class="already-added">Already added as ${escapeHtml(configuredDevice.name)}</small>`
-      : '<small class="muted">Nearby Bluetooth device</small>';
+      : `<small class="muted">Detected ${protocolForDeviceName(device.name) === "h6005" ? "H6005" : "Classic (H6001)"} protocol</small>`;
     const action = configuredDevice
       ? '<button class="secondary compact" disabled>Added</button>'
       : `<button class="primary compact" data-add-discovered="${index}">Add</button>`;
@@ -252,6 +286,7 @@ function renderAll() {
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
+  $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -296,7 +331,7 @@ document.addEventListener("click", async (event) => {
       renderDevices();
       return;
     }
-    settings.devices.push({ ...device, identifier: canonicalIdentifier(device.identifier), profile: device.name.toLowerCase().includes("h6005") ? "h6005" : "classic", enabled: true });
+    settings.devices.push({ ...device, identifier: canonicalIdentifier(device.identifier), profile: protocolForDeviceName(device.name), enabled: true });
     await save(); renderAll();
   }
 
@@ -371,17 +406,33 @@ $("#brightness").addEventListener("input", (event) => {
 });
 $("#brightness").addEventListener("change", save);
 
+$("#party-button").addEventListener("click", async () => {
+  const starting = !partyActive;
+  setStatus(starting ? "Starting party mode…" : "Stopping party mode…", "busy");
+  try {
+    const message = await call("execute_control", {
+      command: starting ? { command: "party", device: null } : { command: "stop_party" },
+    });
+    setPartyActive(starting);
+    setStatus(message);
+  } catch (error) {
+    setPartyActive(false);
+    setStatus(String(error), "error");
+  }
+});
+
 $("#add-preset").addEventListener("click", async () => {
   settings.presets.push({ name: `preset-${settings.presets.length + 1}`, mode: "color", value: "#8e72e8", brightness: 0.5 });
   await save(); renderAll();
 });
 $("#add-schedule").addEventListener("click", async () => {
-  if (!settings.presets.length) { showPage("presets-page"); return setStatus("Add a preset first", "error"); }
+  if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
   settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
   setStatus("Scanning for Govee lights…", "busy");
+  setDiscoveryBusy(true);
   try {
     discovered = (await call("discover_lights")).map((device) => ({
       ...device,
@@ -392,12 +443,38 @@ $("#discover-button").addEventListener("click", async () => {
     setStatus(discovered.length
       ? `Found ${discovered.length} light(s) · ${existingCount} already added`
       : "No Govee lights found");
-  } catch (error) { setStatus(String(error), "error"); }
+  } catch (error) {
+    renderDevices();
+    setStatus(String(error), "error");
+  } finally {
+    setDiscoveryBusy(false);
+  }
+});
+$("#connection-hold-seconds").addEventListener("change", async (event) => {
+  settings.connectionHoldSeconds = Math.max(1, Math.min(60, Math.round(Number(event.target.value) || 6)));
+  event.target.value = settings.connectionHoldSeconds;
+  await save();
 });
 $("#close-button").addEventListener("click", () => call("hide_window"));
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 
+document.addEventListener("keydown", (event) => {
+  const shortcuts = {
+    "1": "controller-page",
+    "2": "automations-page",
+    "3": "settings-page",
+  };
+  if (event.metaKey && shortcuts[event.key]) {
+    event.preventDefault();
+    showPage(shortcuts[event.key]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    call("hide_window");
+  }
+});
+
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");
-if (["presets", "automations", "settings"].includes(requestedPage)) showPage(`${requestedPage}-page`);
+if (requestedPage === "presets") showPage("settings-page");
+else if (["automations", "settings"].includes(requestedPage)) showPage(`${requestedPage}-page`);

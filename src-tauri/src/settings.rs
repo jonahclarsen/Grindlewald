@@ -66,6 +66,8 @@ pub struct Settings {
     pub white: String,
     #[serde(default = "default_brightness")]
     pub brightness: f32,
+    #[serde(default = "default_connection_hold_seconds")]
+    pub connection_hold_seconds: u64,
     #[serde(default)]
     pub presets: Vec<Preset>,
     #[serde(default)]
@@ -84,6 +86,10 @@ fn default_brightness() -> f32 {
     0.4
 }
 
+fn default_connection_hold_seconds() -> u64 {
+    6
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -91,6 +97,7 @@ impl Default for Settings {
             color: default_color(),
             white: default_white(),
             brightness: default_brightness(),
+            connection_hold_seconds: default_connection_hold_seconds(),
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -155,6 +162,9 @@ impl Settings {
     pub fn validate(&self) -> Result<(), String> {
         if !(0.0..=1.0).contains(&self.brightness) {
             return Err("brightness must be between 0 and 1".into());
+        }
+        if !(1..=60).contains(&self.connection_hold_seconds) {
+            return Err("connection hold time must be between 1 and 60 seconds".into());
         }
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
@@ -276,30 +286,32 @@ mod tests {
 
     #[test]
     fn loading_merges_case_only_duplicates_and_migrates_schedule_names() {
-        let mut settings = Settings::default();
-        settings.devices = vec![
-            DeviceConfig {
-                name: "Original lamp".into(),
-                identifier: "AABB-CCDD".into(),
-                profile: DeviceProfile::Classic,
+        let mut settings = Settings {
+            devices: vec![
+                DeviceConfig {
+                    name: "Original lamp".into(),
+                    identifier: "AABB-CCDD".into(),
+                    profile: DeviceProfile::Classic,
+                    enabled: true,
+                },
+                DeviceConfig {
+                    name: "Re-added lamp".into(),
+                    identifier: "aabb-ccdd".into(),
+                    profile: DeviceProfile::Classic,
+                    enabled: true,
+                },
+            ],
+            schedules: vec![Schedule {
+                id: "test".into(),
+                name: "Test".into(),
+                time: "12:00".into(),
                 enabled: true,
-            },
-            DeviceConfig {
-                name: "Re-added lamp".into(),
-                identifier: "aabb-ccdd".into(),
-                profile: DeviceProfile::Classic,
-                enabled: true,
-            },
-        ];
-        settings.schedules.push(Schedule {
-            id: "test".into(),
-            name: "Test".into(),
-            time: "12:00".into(),
-            enabled: true,
-            lights: vec!["Re-added lamp".into(), "Original lamp".into()],
-            preset: "daytime".into(),
-            shell_command: String::new(),
-        });
+                lights: vec!["Re-added lamp".into(), "Original lamp".into()],
+                preset: "daytime".into(),
+                shell_command: String::new(),
+            }],
+            ..Settings::default()
+        };
 
         settings.canonicalize_identifiers();
         assert_eq!(settings.devices.len(), 1);

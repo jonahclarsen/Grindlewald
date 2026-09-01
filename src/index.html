@@ -40,16 +40,11 @@
             <button class="secondary" data-power="false">Lights off</button>
             <button class="primary" data-power="true">Lights on</button>
           </div>
+          <button id="party-button" class="party-button" aria-pressed="false">Start party mode</button>
         </div>
 
-        <div class="section-heading"><h3>Presets</h3><button class="text-button" data-page-link="presets-page">Edit</button></div>
+        <div class="section-heading"><h3>Presets</h3><button class="text-button" data-page-link="settings-page">Edit</button></div>
         <div id="quick-presets" class="preset-chips"></div>
-      </section>
-
-      <section id="presets-page" class="page">
-        <div class="page-title"><div><span class="eyebrow">Your palette</span><h2>Color presets</h2></div><button id="add-preset" class="round-button">＋</button></div>
-        <p class="page-copy">Every preset works here, in schedules, and from <code>grindlewaldctl</code>.</p>
-        <div id="preset-editor" class="stack"></div>
       </section>
 
       <section id="automations-page" class="page">
@@ -59,19 +54,28 @@
       </section>
 
       <section id="settings-page" class="page">
-        <div class="page-title"><div><span class="eyebrow">Bluetooth</span><h2>Lights</h2></div><button id="discover-button" class="secondary compact">Discover</button></div>
+        <div class="page-title"><div><span class="eyebrow">Preferences</span><h2>Settings</h2></div></div>
+        <div class="editor-card connection-setting">
+          <span><strong>Keep connection open</strong><small class="muted">Faster follow-up changes</small></span>
+          <label><input id="connection-hold-seconds" type="number" min="1" max="60" step="1" inputmode="numeric" aria-label="Connection hold duration in seconds"><span>seconds</span></label>
+        </div>
+
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Your palette</span><h3>Color presets</h3></div><button id="add-preset" class="round-button">＋</button></div>
+        <p class="page-copy">Available in the controller, automations, and <code>grindlewaldctl</code>.</p>
+        <div id="preset-editor" class="stack"></div>
+
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Bluetooth</span><h3>Lights</h3></div><button id="discover-button" class="secondary compact">Discover</button></div>
         <p class="page-copy">Device identifiers stay in your private Application Support folder and are never bundled with the app.</p>
-        <div id="discovered-devices" class="stack"></div>
+        <div id="discovered-devices" class="stack" aria-live="polite"></div>
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 
       <nav aria-label="Main navigation">
-        <button class="nav-item active" data-page="controller-page"><span>◉</span>Control</button>
-        <button class="nav-item" data-page="presets-page"><span>✦</span>Presets</button>
-        <button class="nav-item" data-page="automations-page"><span>◷</span>Timers</button>
-        <button class="nav-item" data-page="settings-page"><span>⚙</span>Settings</button>
+        <button class="nav-item active" data-page="controller-page" title="Control (⌘1)"><span>◉</span>Control<kbd>⌘1</kbd></button>
+        <button class="nav-item" data-page="automations-page" title="Automations (⌘2)"><span>◷</span>Automations<kbd>⌘2</kbd></button>
+        <button class="nav-item" data-page="settings-page" title="Settings (⌘3)"><span>⚙</span>Settings<kbd>⌘3</kbd></button>
       </nav>
     </main>
   </body>
