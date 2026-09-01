@@ -12,6 +12,21 @@
   <array>
     <string>com.jonahclarsen.grindlewald</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GRINDLEWALD_DEV_SUPERVISOR</key>
+    <string>1</string>
+    <key>GRINDLEWALD_REPO</key>
+    <string>__REPO__</string>
+    <key>GRINDLEWALD_PNPM</key>
+    <string>__PNPM__</string>
+    <key>GRINDLEWALD_CARGO</key>
+    <string>__CARGO__</string>
+    <key>GRINDLEWALD_RUSTC</key>
+    <string>__RUSTC__</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

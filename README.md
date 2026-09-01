@@ -97,7 +97,7 @@ An automation may also run a shell command through `/bin/zsh -lc`. Enable **Run 
 
 The command is stored only in the local settings file. Use this only for commands you trust. **Test light + script now** saves the automation and runs both halves immediately, including the authorization prompt when enabled.
 
-## Start automatically as a debug app
+## Start automatically in live development mode
 
 To install the included per-user LaunchAgent:
 
@@ -105,9 +105,9 @@ To install the included per-user LaunchAgent:
 ./scripts/install-launch-agent.sh
 ```
 
-The installer builds a debug-mode `Grindlewald.app`, copies it to `~/Applications`, and registers a per-user LaunchAgent that runs its bundled executable at login and restarts it if it exits. The agent is explicitly associated with the Grindlewald bundle identifier, so both Bluetooth permission and the System Settings Background Items entry use **Grindlewald** instead of a shell or launcher name. Logs are written under `~/Library/Logs/Grindlewald`.
+The installer creates a debug-mode `Grindlewald.app` container in `~/Applications` and registers a per-user LaunchAgent. The signed app acts as the development supervisor and keeps `pnpm tauri dev` running. Tauri watches the frontend and Rust sources; frontend edits reload automatically, while Rust edits rebuild and restart the executable inside the existing app container. You do not need to rerun the installer after source changes.
 
-Re-run the installer after changing source code to rebuild and refresh the installed debug app. The login process itself does not need shell or Documents-folder permission.
+The development runner launches each build from inside the signed container, and the agent is associated with the Grindlewald bundle identifier. Bluetooth permission and the System Settings Background Items entry therefore use **Grindlewald** instead of a shell or generic development process. Logs are written under `~/Library/Logs/Grindlewald`. Re-run the installer only if the repository moves or the LaunchAgent scripts change.
 
 Remove it with:
 
