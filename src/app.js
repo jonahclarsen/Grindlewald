@@ -11,6 +11,7 @@ const demoSettings = {
   brightness: 0.4,
   connectionHoldSeconds: 6,
   breathingPaceSeconds: 2,
+  breathingHueStepDegrees: 12,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -314,6 +315,8 @@ function renderAll() {
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   $("#breathing-pace").value = settings.breathingPaceSeconds;
   $("#breathing-pace-output").value = `${Number(settings.breathingPaceSeconds).toFixed(2)}s`;
+  $("#breathing-hue-step").value = settings.breathingHueStepDegrees;
+  $("#breathing-hue-step-output").value = `${Number(settings.breathingHueStepDegrees).toFixed(0)}°`;
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -470,7 +473,12 @@ async function toggleEffect(effect) {
       command: starting
         ? effect === "party"
           ? { command: "party", device: null }
-          : { command: "breathe", pace_seconds: settings.breathingPaceSeconds, device: null }
+          : {
+              command: "breathe",
+              pace_seconds: settings.breathingPaceSeconds,
+              hue_step_degrees: settings.breathingHueStepDegrees,
+              device: null,
+            }
         : { command: "stop_effect" },
     });
     setEffectActive(starting ? effect : null);
@@ -488,6 +496,18 @@ $("#breathing-pace").addEventListener("input", (event) => {
   $("#breathing-pace-output").value = `${settings.breathingPaceSeconds.toFixed(2)}s`;
 });
 $("#breathing-pace").addEventListener("change", async () => {
+  await save();
+  if (activeEffect === "breathe") {
+    await call("execute_control", { command: { command: "stop_effect" } });
+    setEffectActive(null);
+    await toggleEffect("breathe");
+  }
+});
+$("#breathing-hue-step").addEventListener("input", (event) => {
+  settings.breathingHueStepDegrees = Number(event.target.value);
+  $("#breathing-hue-step-output").value = `${settings.breathingHueStepDegrees.toFixed(0)}°`;
+});
+$("#breathing-hue-step").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
     await call("execute_control", { command: { command: "stop_effect" } });

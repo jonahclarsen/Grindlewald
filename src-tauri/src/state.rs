@@ -62,10 +62,13 @@ impl SharedState {
         }
         if let ControlCommand::Breathe {
             pace_seconds,
+            hue_step_degrees,
             device,
         } = &command
         {
-            return self.start_breathing(*pace_seconds, device.clone()).await;
+            return self
+                .start_breathing(*pace_seconds, *hue_step_degrees, device.clone())
+                .await;
         }
         if matches!(
             command,
@@ -156,10 +159,14 @@ impl SharedState {
     async fn start_breathing(
         &self,
         pace_seconds: f32,
+        hue_step_degrees: f32,
         device: Option<String>,
     ) -> Result<String, String> {
         if !pace_seconds.is_finite() || !(0.75..=15.0).contains(&pace_seconds) {
             return Err("breathing pace must be between 0.75 and 15 seconds".into());
+        }
+        if !hue_step_degrees.is_finite() || !(1.0..=120.0).contains(&hue_step_degrees) {
+            return Err("breathing hue step must be between 1 and 120 degrees".into());
         }
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
@@ -173,9 +180,7 @@ impl SharedState {
                 return Err(error);
             }
         };
-        const COLORS: [&str; 7] = [
-            "#ff315e", "#8b55ff", "#337dff", "#27cfff", "#35e59b", "#ffd04a", "#ff7138",
-        ];
+        let mut hue = hue_from_rgb(crate::protocol::parse_hex_color(&settings.color)?);
         if let Err(error) = self
             .controller
             .lock()
@@ -183,7 +188,7 @@ impl SharedState {
             .apply(
                 &settings,
                 &ControlCommand::BreathingFrame {
-                    value: COLORS[0].into(),
+                    value: color_at_hue(hue),
                     device: device.clone(),
                 },
             )
@@ -195,14 +200,14 @@ impl SharedState {
 
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut color_index = 1;
             loop {
                 tokio::time::sleep(Duration::from_secs_f32(pace_seconds)).await;
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
+                hue = (hue + hue_step_degrees) % 360.0;
                 let command = ControlCommand::BreathingFrame {
-                    value: COLORS[color_index].into(),
+                    value: color_at_hue(hue),
                     device: device.clone(),
                 };
                 if state
@@ -217,10 +222,11 @@ impl SharedState {
                     state.party_active.store(false, Ordering::SeqCst);
                     break;
                 }
-                color_index = (color_index + 1) % COLORS.len();
             }
         });
-        Ok(format!("Breathing every {pace_seconds:.2} seconds"))
+        Ok(format!(
+            "Breathing every {pace_seconds:.2} seconds with {hue_step_degrees:.0}° hue steps"
+        ))
     }
 
     async fn stop_effect(&self) -> Result<String, String> {
@@ -396,4 +402,52 @@ fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<Contro
             device,
         },
     })
+}
+
+fn hue_from_rgb([red, green, blue]: [u8; 3]) -> f32 {
+    let red = f32::from(red) / 255.0;
+    let green = f32::from(green) / 255.0;
+    let blue = f32::from(blue) / 255.0;
+    let maximum = red.max(green).max(blue);
+    let minimum = red.min(green).min(blue);
+    let difference = maximum - minimum;
+    if difference == 0.0 {
+        return 0.0;
+    }
+    let hue = if maximum == red {
+        ((green - blue) / difference) % 6.0
+    } else if maximum == green {
+        (blue - red) / difference + 2.0
+    } else {
+        (red - green) / difference + 4.0
+    };
+    (hue * 60.0 + 360.0) % 360.0
+}
+
+fn color_at_hue(hue: f32) -> String {
+    let sector = hue.rem_euclid(360.0) / 60.0;
+    let intermediate = (255.0 * (1.0 - ((sector % 2.0) - 1.0).abs())).round() as u8;
+    let [red, green, blue] = match sector.floor() as u8 {
+        0 => [255, intermediate, 0],
+        1 => [intermediate, 255, 0],
+        2 => [0, 255, intermediate],
+        3 => [0, intermediate, 255],
+        4 => [intermediate, 0, 255],
+        _ => [255, 0, intermediate],
+    };
+    format!("#{red:02x}{green:02x}{blue:02x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{color_at_hue, hue_from_rgb};
+
+    #[test]
+    fn breathing_colors_move_continuously_around_the_hue_wheel() {
+        assert_eq!(color_at_hue(0.0), "#ff0000");
+        assert_eq!(color_at_hue(60.0), "#ffff00");
+        assert_eq!(color_at_hue(120.0), "#00ff00");
+        assert_eq!(color_at_hue(360.0), "#ff0000");
+        assert!((hue_from_rgb([255, 79, 34]) - 12.2).abs() < 0.1);
+    }
 }

@@ -69,6 +69,9 @@ enum CliCommand {
     Breathe {
         #[arg(long, default_value_t = 2.0, value_parser = clap::value_parser!(f32))]
         pace: f32,
+        /// Degrees to move around the hue wheel after each update (1-120).
+        #[arg(long, default_value_t = 12.0, value_parser = clap::value_parser!(f32))]
+        hue_step: f32,
         #[arg(short, long)]
         light: Option<String>,
     },
@@ -121,8 +124,13 @@ async fn main() -> anyhow::Result<()> {
             device: light,
         },
         CliCommand::Party { light } => ControlCommand::Party { device: light },
-        CliCommand::Breathe { pace, light } => ControlCommand::Breathe {
+        CliCommand::Breathe {
+            pace,
+            hue_step,
+            light,
+        } => ControlCommand::Breathe {
             pace_seconds: pace,
+            hue_step_degrees: hue_step,
             device: light,
         },
         CliCommand::StopParty => ControlCommand::StopParty,

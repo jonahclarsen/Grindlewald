@@ -72,6 +72,8 @@ pub struct Settings {
     pub connection_hold_seconds: u64,
     #[serde(default = "default_breathing_pace_seconds")]
     pub breathing_pace_seconds: f32,
+    #[serde(default = "default_breathing_hue_step_degrees")]
+    pub breathing_hue_step_degrees: f32,
     #[serde(default)]
     pub presets: Vec<Preset>,
     #[serde(default)]
@@ -98,6 +100,10 @@ fn default_breathing_pace_seconds() -> f32 {
     2.0
 }
 
+fn default_breathing_hue_step_degrees() -> f32 {
+    12.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -107,6 +113,7 @@ impl Default for Settings {
             brightness: default_brightness(),
             connection_hold_seconds: default_connection_hold_seconds(),
             breathing_pace_seconds: default_breathing_pace_seconds(),
+            breathing_hue_step_degrees: default_breathing_hue_step_degrees(),
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -179,6 +186,11 @@ impl Settings {
             || !(0.75..=15.0).contains(&self.breathing_pace_seconds)
         {
             return Err("breathing pace must be between 0.75 and 15 seconds".into());
+        }
+        if !self.breathing_hue_step_degrees.is_finite()
+            || !(1.0..=120.0).contains(&self.breathing_hue_step_degrees)
+        {
+            return Err("breathing hue step must be between 1 and 120 degrees".into());
         }
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;

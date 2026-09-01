@@ -32,6 +32,8 @@ pub enum ControlCommand {
     },
     Breathe {
         pace_seconds: f32,
+        #[serde(default = "default_breathing_hue_step_degrees")]
+        hue_step_degrees: f32,
         device: Option<String>,
     },
     StopParty,
@@ -49,6 +51,10 @@ pub enum ControlCommand {
         payload: String,
         device: Option<String>,
     },
+}
+
+fn default_breathing_hue_step_degrees() -> f32 {
+    12.0
 }
 
 impl ControlCommand {
