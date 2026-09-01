@@ -162,8 +162,8 @@ impl SharedState {
         hue_step_degrees: f32,
         device: Option<String>,
     ) -> Result<String, String> {
-        if !pace_seconds.is_finite() || !(0.1..=15.0).contains(&pace_seconds) {
-            return Err("breathing pace must be between 0.1 and 15 seconds".into());
+        if !pace_seconds.is_finite() || !(0.1..=2.0).contains(&pace_seconds) {
+            return Err("breathing pace must be between 0.1 and 2 seconds".into());
         }
         if !hue_step_degrees.is_finite() || !(0.1..=120.0).contains(&hue_step_degrees) {
             return Err("breathing hue step must be between 0.1 and 120 degrees".into());

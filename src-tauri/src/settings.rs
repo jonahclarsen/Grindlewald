@@ -199,9 +199,9 @@ impl Settings {
             return Err("connection hold time must be between 1 and 60 seconds".into());
         }
         if !self.breathing_pace_seconds.is_finite()
-            || !(0.1..=15.0).contains(&self.breathing_pace_seconds)
+            || !(0.1..=2.0).contains(&self.breathing_pace_seconds)
         {
-            return Err("breathing pace must be between 0.1 and 15 seconds".into());
+            return Err("breathing pace must be between 0.1 and 2 seconds".into());
         }
         if !self.breathing_hue_step_degrees.is_finite()
             || !(0.1..=120.0).contains(&self.breathing_hue_step_degrees)
@@ -332,6 +332,10 @@ mod tests {
         assert!(settings.validate().is_ok());
 
         settings.breathing_pace_seconds = 0.05;
+        assert!(settings.validate().is_err());
+        settings.breathing_pace_seconds = 2.0;
+        assert!(settings.validate().is_ok());
+        settings.breathing_pace_seconds = 2.05;
         assert!(settings.validate().is_err());
         settings.breathing_pace_seconds = 0.1;
         settings.breathing_hue_step_degrees = 0.05;
