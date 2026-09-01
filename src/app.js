@@ -30,6 +30,107 @@ const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]);
+const canonicalIdentifier = (value) => String(value).trim().toLocaleUpperCase();
+const normalizeIdentifier = canonicalIdentifier;
+const configuredDeviceFor = (discoveredDevice) => settings.devices.find(
+  (configuredDevice) => normalizeIdentifier(configuredDevice.identifier) === normalizeIdentifier(discoveredDevice.identifier),
+);
+
+function hexToRgb(value) {
+  const hex = value.replace("#", "");
+  return [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
+}
+
+function rgbToHex(rgb) {
+  return `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hueFromHex(value) {
+  const [red, green, blue] = hexToRgb(value).map((channel) => channel / 255);
+  const maximum = Math.max(red, green, blue);
+  const minimum = Math.min(red, green, blue);
+  const difference = maximum - minimum;
+  if (difference === 0) return 0;
+  let hue;
+  if (maximum === red) hue = ((green - blue) / difference) % 6;
+  else if (maximum === green) hue = (blue - red) / difference + 2;
+  else hue = (red - green) / difference + 4;
+  return (hue * 60 + 360) % 360;
+}
+
+function colorAtHue(hue) {
+  const sector = ((hue % 360) + 360) % 360 / 60;
+  const intermediate = Math.round(255 * (1 - Math.abs((sector % 2) - 1)));
+  const colors = [
+    [255, intermediate, 0], [intermediate, 255, 0], [0, 255, intermediate],
+    [0, intermediate, 255], [intermediate, 0, 255], [255, 0, intermediate],
+  ];
+  return rgbToHex(colors[Math.floor(sector) % 6]);
+}
+
+function mixRgb(start, end, amount) {
+  return start.map((channel, index) => channel + (end[index] - channel) * amount);
+}
+
+function whiteAtPosition(position) {
+  const warm = [255, 141, 11];
+  const neutral = [255, 238, 222];
+  const cool = [214, 225, 255];
+  return position <= 0.5
+    ? rgbToHex(mixRgb(warm, neutral, position * 2))
+    : rgbToHex(mixRgb(neutral, cool, (position - 0.5) * 2));
+}
+
+function whitePositionFromHex(value) {
+  const target = hexToRgb(value);
+  let bestPosition = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let step = 0; step <= 100; step += 1) {
+    const candidate = hexToRgb(whiteAtPosition(step / 100));
+    const distance = candidate.reduce((sum, channel, index) => sum + (channel - target[index]) ** 2, 0);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPosition = step / 100;
+    }
+  }
+  return bestPosition;
+}
+
+function updateHue(hue, shouldSend = true) {
+  const normalizedHue = ((hue % 360) + 360) % 360;
+  settings.color = colorAtHue(normalizedHue);
+  $("#hue-knob").style.left = `${normalizedHue / 360 * 100}%`;
+  $("#color-swatch").style.background = settings.color;
+  $("#hue-track").setAttribute("aria-valuenow", String(Math.round(normalizedHue)));
+  if (shouldSend) queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
+}
+
+function updateWhite(position, shouldSend = true) {
+  const normalizedPosition = Math.max(0, Math.min(1, position));
+  settings.white = whiteAtPosition(normalizedPosition);
+  $("#white-knob").style.left = `${normalizedPosition * 100}%`;
+  $("#white-swatch").style.background = settings.white;
+  $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
+  if (shouldSend) queueControl({ command: "white", value: settings.white, brightness: settings.brightness, device: null });
+}
+
+function makeDraggable(track, update) {
+  const applyPointer = (event) => {
+    const bounds = track.getBoundingClientRect();
+    update(Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
+  };
+  track.addEventListener("pointerdown", (event) => {
+    track.setPointerCapture(event.pointerId);
+    applyPointer(event);
+  });
+  track.addEventListener("pointermove", (event) => {
+    if (track.hasPointerCapture(event.pointerId)) applyPointer(event);
+  });
+  track.addEventListener("pointerup", (event) => {
+    if (track.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
+    save();
+  });
+}
 
 function setStatus(message, kind = "ready") {
   $("#status").textContent = message;
@@ -40,7 +141,8 @@ async function call(command, args = {}) {
   if (demoMode) {
     if (command === "get_settings") return structuredClone(demoSettings);
     if (command === "discover_lights") return [
-      { name: "Govee H6005", identifier: "LOCAL-DEMO-ID" },
+      { name: "Govee H6005", identifier: "local-ble-id-1" },
+      { name: "Govee new lamp", identifier: "LOCAL-DEMO-ID" },
     ];
     return command === "test_schedule" ? "Updated 2 light(s). Shell command completed." : "Updated 2 light(s)";
   }
@@ -86,16 +188,23 @@ function renderQuickPresets() {
 }
 
 function renderPresets() {
-  $("#preset-editor").innerHTML = settings.presets.length ? settings.presets.map((preset, index) => `
+  $("#preset-editor").innerHTML = settings.presets.length ? settings.presets.map((preset, index) => {
+    const colorPosition = preset.mode === "color"
+      ? Math.round(hueFromHex(preset.value))
+      : Math.round(whitePositionFromHex(preset.value) * 100);
+    const colorClass = preset.mode === "color" ? "preset-hue-range" : "preset-white-range";
+    const colorMaximum = preset.mode === "color" ? 360 : 100;
+    return `
     <article class="editor-card" data-preset-index="${index}">
       <div class="card-title"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><button class="remove-button" data-remove-preset="${index}">Remove</button></div>
       <div class="field-grid">
         <label class="field">Name<input data-preset-field="name" value="${escapeHtml(preset.name)}"></label>
         <label class="field">Mode<select data-preset-field="mode"><option value="color" ${preset.mode === "color" ? "selected" : ""}>Color</option><option value="white" ${preset.mode === "white" ? "selected" : ""}>White</option></select></label>
-        <label class="field">Hue<input class="small-color" type="color" data-preset-field="value" value="${escapeHtml(preset.value)}"></label>
+        <label class="field">${preset.mode === "color" ? "Hue" : "Warmth"}<input class="preset-color-range ${colorClass}" type="range" min="0" max="${colorMaximum}" data-preset-color value="${colorPosition}"></label>
         <label class="field">Brightness <span>${Math.round(preset.brightness * 100)}%</span><input type="range" min="0" max="100" value="${Math.round(preset.brightness * 100)}" data-preset-field="brightness"></label>
       </div>
-    </article>`).join("") : '<div class="empty">No presets yet. Add one with ＋.</div>';
+    </article>`;
+  }).join("") : '<div class="empty">No presets yet. Add one with ＋.</div>';
 }
 
 function renderSchedules() {
@@ -122,17 +231,25 @@ function renderDevices() {
       <div class="field-grid">
         <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
         <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
-        <label class="field full">Bluetooth identifier<input data-device-field="identifier" value="${escapeHtml(device.identifier)}" spellcheck="false"></label>
+        <label class="field full">Bluetooth identifier<input class="identifier-input" data-device-field="identifier" value="${escapeHtml(canonicalIdentifier(device.identifier))}" spellcheck="false"></label>
       </div>
     </article>`).join("") : '<div class="empty">No lights configured. Click Discover to find nearby Govee lights.</div>';
 
-  $("#discovered-devices").innerHTML = discovered.map((device, index) => `
-    <article class="editor-card"><div class="card-title"><span><strong>${escapeHtml(device.name)}</strong><small class="muted"> Nearby Bluetooth device</small></span><button class="primary compact" data-add-discovered="${index}">Add</button></div></article>`).join("");
+  $("#discovered-devices").innerHTML = discovered.map((device, index) => {
+    const configuredDevice = configuredDeviceFor(device);
+    const detail = configuredDevice
+      ? `<small class="already-added">Already added as ${escapeHtml(configuredDevice.name)}</small>`
+      : '<small class="muted">Nearby Bluetooth device</small>';
+    const action = configuredDevice
+      ? '<button class="secondary compact" disabled>Added</button>'
+      : `<button class="primary compact" data-add-discovered="${index}">Add</button>`;
+    return `<article class="editor-card"><div class="card-title"><span><strong>${escapeHtml(device.name)}</strong>${detail}</span>${action}</div></article>`;
+  }).join("");
 }
 
 function renderAll() {
-  $("#color-picker").value = settings.color;
-  $("#white-picker").value = settings.white;
+  updateHue(hueFromHex(settings.color), false);
+  updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
   renderQuickPresets();
@@ -173,8 +290,13 @@ document.addEventListener("click", async (event) => {
   const addDiscovered = event.target.closest("[data-add-discovered]");
   if (addDiscovered) {
     const device = discovered[Number(addDiscovered.dataset.addDiscovered)];
-    settings.devices.push({ ...device, profile: device.name.toLowerCase().includes("h6005") ? "h6005" : "classic", enabled: true });
-    discovered = discovered.filter((candidate) => candidate.identifier !== device.identifier);
+    const configuredDevice = configuredDeviceFor(device);
+    if (configuredDevice) {
+      setStatus(`Already added as ${configuredDevice.name}`);
+      renderDevices();
+      return;
+    }
+    settings.devices.push({ ...device, identifier: canonicalIdentifier(device.identifier), profile: device.name.toLowerCase().includes("h6005") ? "h6005" : "classic", enabled: true });
     await save(); renderAll();
   }
 
@@ -188,12 +310,18 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("change", async (event) => {
   const presetCard = event.target.closest("[data-preset-index]");
-  if (presetCard && event.target.dataset.presetField) {
+  if (presetCard && (event.target.dataset.presetField || event.target.hasAttribute("data-preset-color"))) {
     const preset = settings.presets[Number(presetCard.dataset.presetIndex)];
-    const field = event.target.dataset.presetField;
-    const oldName = preset.name;
-    preset[field] = field === "brightness" ? Number(event.target.value) / 100 : event.target.value;
-    if (field === "name") settings.schedules.forEach((schedule) => { if (schedule.preset === oldName) schedule.preset = preset.name; });
+    if (event.target.hasAttribute("data-preset-color")) {
+      preset.value = preset.mode === "color"
+        ? colorAtHue(Number(event.target.value))
+        : whiteAtPosition(Number(event.target.value) / 100);
+    } else {
+      const field = event.target.dataset.presetField;
+      const oldName = preset.name;
+      preset[field] = field === "brightness" ? Number(event.target.value) / 100 : event.target.value;
+      if (field === "name") settings.schedules.forEach((schedule) => { if (schedule.preset === oldName) schedule.preset = preset.name; });
+    }
     await save(); renderAll();
   }
   const scheduleCard = event.target.closest("[data-schedule-index]");
@@ -214,22 +342,28 @@ document.addEventListener("change", async (event) => {
     const device = settings.devices[Number(deviceCard.dataset.deviceIndex)];
     const oldName = device.name;
     const field = event.target.dataset.deviceField;
-    device[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    device[field] = event.target.type === "checkbox"
+      ? event.target.checked
+      : field === "identifier" ? canonicalIdentifier(event.target.value) : event.target.value;
     if (field === "name") settings.schedules.forEach((schedule) => { schedule.lights = schedule.lights.map((name) => name === oldName ? device.name : name); });
     await save(); renderAll();
   }
 });
 
-$("#color-picker").addEventListener("input", (event) => {
-  settings.color = event.target.value;
-  queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
+makeDraggable($("#hue-track"), (position) => updateHue(position * 360));
+makeDraggable($("#white-track"), updateWhite);
+$("#hue-track").addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  updateHue(hueFromHex(settings.color) + (event.key === "ArrowRight" ? 3 : -3));
+  save();
 });
-$("#color-picker").addEventListener("change", save);
-$("#white-picker").addEventListener("input", (event) => {
-  settings.white = event.target.value;
-  queueControl({ command: "white", value: settings.white, brightness: settings.brightness, device: null });
+$("#white-track").addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  updateWhite(whitePositionFromHex(settings.white) + (event.key === "ArrowRight" ? 0.02 : -0.02));
+  save();
 });
-$("#white-picker").addEventListener("change", save);
 $("#brightness").addEventListener("input", (event) => {
   settings.brightness = Number(event.target.value) / 100;
   $("#brightness-output").value = `${event.target.value}%`;
@@ -249,9 +383,15 @@ $("#add-schedule").addEventListener("click", async () => {
 $("#discover-button").addEventListener("click", async () => {
   setStatus("Scanning for Govee lights…", "busy");
   try {
-    const configured = new Set(settings.devices.map((device) => device.identifier));
-    discovered = (await call("discover_lights")).filter((device) => !configured.has(device.identifier));
-    renderDevices(); setStatus(discovered.length ? `Found ${discovered.length} light(s)` : "No new Govee lights found");
+    discovered = (await call("discover_lights")).map((device) => ({
+      ...device,
+      identifier: canonicalIdentifier(device.identifier),
+    }));
+    const existingCount = discovered.filter(configuredDeviceFor).length;
+    renderDevices();
+    setStatus(discovered.length
+      ? `Found ${discovered.length} light(s) · ${existingCount} already added`
+      : "No Govee lights found");
   } catch (error) { setStatus(String(error), "error"); }
 });
 $("#close-button").addEventListener("click", () => call("hide_window"));

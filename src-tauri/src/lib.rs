@@ -10,9 +10,36 @@ use command::ControlCommand;
 use settings::Settings;
 use state::SharedState;
 use tauri::{
-    Manager,
+    Manager, PhysicalPosition,
+    image::Image,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+
+fn tray_icon() -> Image<'static> {
+    const SIZE: usize = 32;
+    const SCALE: usize = 4;
+    const LEFT: usize = 6;
+    const TOP: usize = 2;
+    const GLYPH: [&str; 7] = [
+        "01110", "10001", "10000", "10111", "10001", "10001", "01110",
+    ];
+
+    let mut rgba = vec![0_u8; SIZE * SIZE * 4];
+    for (row, line) in GLYPH.iter().enumerate() {
+        for (column, pixel) in line.bytes().enumerate() {
+            if pixel != b'1' {
+                continue;
+            }
+            for y in 0..3 {
+                for x in 0..3 {
+                    let offset = ((TOP + row * SCALE + y) * SIZE + LEFT + column * SCALE + x) * 4;
+                    rgba[offset + 3] = 255;
+                }
+            }
+        }
+    }
+    Image::new_owned(rgba, SIZE as u32, SIZE as u32)
+}
 
 #[tauri::command]
 fn get_settings(state: tauri::State<'_, SharedState>) -> Result<Settings, String> {
@@ -74,7 +101,7 @@ pub fn run() {
             app.manage(state);
 
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().expect("app icon").clone())
+                .icon(tray_icon())
                 .icon_as_template(true)
                 .tooltip("Grindlewald")
                 .show_menu_on_left_click(false)
@@ -82,6 +109,8 @@ pub fn run() {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        position,
+                        rect,
                         ..
                     } = event
                         && let Some(window) = tray.app_handle().get_webview_window("main")
@@ -90,7 +119,32 @@ pub fn run() {
                         if visible {
                             let _ = window.hide();
                         } else {
-                            let _ = window.center();
+                            let scale = window.scale_factor().unwrap_or(1.0);
+                            let tray_position = rect.position.to_physical::<f64>(scale);
+                            let tray_size = rect.size.to_physical::<f64>(scale);
+                            let window_size = window.outer_size().unwrap_or_default();
+                            let mut x = tray_position.x + tray_size.width / 2.0
+                                - f64::from(window_size.width) / 2.0;
+                            let mut y = tray_position.y + tray_size.height + 6.0 * scale;
+
+                            if let Ok(Some(monitor)) =
+                                window.monitor_from_point(position.x, position.y)
+                            {
+                                let monitor_position = monitor.position();
+                                let monitor_size = monitor.size();
+                                let minimum_x = f64::from(monitor_position.x);
+                                let maximum_x = minimum_x + f64::from(monitor_size.width)
+                                    - f64::from(window_size.width);
+                                let minimum_y = f64::from(monitor_position.y);
+                                let maximum_y = minimum_y + f64::from(monitor_size.height)
+                                    - f64::from(window_size.height);
+                                x = x.clamp(minimum_x, maximum_x.max(minimum_x));
+                                y = y.clamp(minimum_y, maximum_y.max(minimum_y));
+                            }
+                            let _ = window.set_position(PhysicalPosition::new(
+                                x.round() as i32,
+                                y.round() as i32,
+                            ));
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
@@ -99,11 +153,15 @@ pub fn run() {
                 .build(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            tauri::WindowEvent::Focused(false) => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,

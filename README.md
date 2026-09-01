@@ -10,12 +10,13 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 
 ## Highlights
 
-- Native macOS menu-bar app with no Dock icon
-- Separate native color wells for RGB mode and the bulbs' dedicated-white mode
-- Picker input switches mode immediately while dragging
+- Native macOS menu-bar popover that anchors under its icon and hides when it loses focus
+- A custom click-and-drag hue control for RGB mode and warm-to-cool slider for dedicated-white mode
+- Dragging either control switches light mode immediately
 - BLE connections remain open for six seconds after activity, making follow-up color changes fast
 - Named color presets shared by the UI, CLI, and automations
-- Bluetooth discovery plus add, edit, enable, and remove controls for individual lights
+- Bluetooth discovery plus add, edit, enable, and remove controls for individual lights; existing matches remain visible and are labeled as already added
+- Bluetooth identifiers are displayed and stored in uppercase but matched case-insensitively for discovery and live connections
 - Daily local-time automations targeting one, several, or all enabled lights
 - Optional trusted shell command run alongside an automation, with a full Test button
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too

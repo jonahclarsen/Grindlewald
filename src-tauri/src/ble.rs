@@ -61,7 +61,7 @@ impl BleController {
             {
                 discovered.push(DiscoveredDevice {
                     name,
-                    identifier: peripheral.id().to_string(),
+                    identifier: crate::settings::canonical_identifier(&peripheral.id().to_string()),
                 });
             }
         }
@@ -116,7 +116,7 @@ impl BleController {
             .map_err(|error| format!("invalid control UUID: {error}"))?;
 
         let writes = selected.iter().map(|device| {
-            let peripheral = self.connections[&device.identifier].clone();
+            let peripheral = self.connections[&normalize(&device.identifier)].clone();
             let frames = frames_for(command, device.profile);
             async move {
                 let characteristic = peripheral
@@ -159,13 +159,14 @@ impl BleController {
     async fn ensure_connected(&mut self, devices: &[DeviceConfig]) -> Result<(), String> {
         let mut missing = Vec::new();
         for device in devices {
-            let connected = if let Some(peripheral) = self.connections.get(&device.identifier) {
+            let connection_key = normalize(&device.identifier);
+            let connected = if let Some(peripheral) = self.connections.get(&connection_key) {
                 peripheral.is_connected().await.unwrap_or(false)
             } else {
                 false
             };
             if !connected {
-                self.connections.remove(&device.identifier);
+                self.connections.remove(&connection_key);
                 missing.push(device.clone());
             }
         }
@@ -205,7 +206,7 @@ impl BleController {
                     .discover_services()
                     .await
                     .map_err(|error| format!("{}: {error}", device.name))?;
-                Ok::<_, String>((device.identifier, peripheral))
+                Ok::<_, String>((normalize(&device.identifier), peripheral))
             });
         }
 
@@ -281,5 +282,15 @@ fn frames_for(
         ControlCommand::Preset { .. } => {
             Err("preset commands must be resolved before reaching Bluetooth".into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize;
+
+    #[test]
+    fn bluetooth_identifiers_are_matched_case_insensitively() {
+        assert_eq!(normalize("AA11-BB22-CC33"), normalize("aa11-bb22-cc33"));
     }
 }

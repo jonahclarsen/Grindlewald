@@ -11,31 +11,26 @@
     <main class="app-shell">
       <header>
         <div class="brand-mark" aria-hidden="true">G</div>
-        <div>
-          <h1>Grindlewald</h1>
-          <p class="subtitle">A little brighter, instantly.</p>
-        </div>
+        <h1>Grindlewald</h1>
         <button id="close-button" class="icon-button" aria-label="Hide window">×</button>
       </header>
 
       <section id="controller-page" class="page active">
-        <div class="hero-card">
-          <div class="eyebrow"><span id="connection-dot"></span><span id="status">Ready</span></div>
-          <h2>Set the mood</h2>
-          <p>Drag either color well. The light mode follows the picker automatically.</p>
+        <div class="controller-status eyebrow"><span id="connection-dot"></span><span id="status">Ready</span></div>
+
+        <div class="picker-card color-card custom-picker">
+          <div class="picker-title"><span class="mode-icon">✦</span><span><strong>Color</strong><small>Drag to choose a hue</small></span><span id="color-swatch" class="large-swatch"></span></div>
+          <div id="hue-track" class="picker-track hue-track" role="slider" aria-label="Color hue" aria-valuemin="0" aria-valuemax="360" tabindex="0">
+            <span id="hue-knob" class="picker-knob"></span>
+          </div>
         </div>
 
-        <div class="picker-grid">
-          <label class="picker-card color-card">
-            <span class="mode-icon">✦</span>
-            <span><strong>Color</strong><small>RGB mode</small></span>
-            <input id="color-picker" type="color" value="#ff4f22" aria-label="Color-mode hue" />
-          </label>
-          <label class="picker-card white-card">
-            <span class="mode-icon">☼</span>
-            <span><strong>White</strong><small>Dedicated white LEDs</small></span>
-            <input id="white-picker" type="color" value="#ffd5ad" aria-label="White-mode hue" />
-          </label>
+        <div class="picker-card white-card custom-picker">
+          <div class="picker-title"><span class="mode-icon">☼</span><span><strong>White</strong><small>Dedicated white LEDs</small></span><span id="white-swatch" class="large-swatch"></span></div>
+          <div id="white-track" class="picker-track white-track" role="slider" aria-label="White warmth" aria-valuemin="0" aria-valuemax="100" tabindex="0">
+            <span id="white-knob" class="picker-knob"></span>
+          </div>
+          <div class="temperature-labels"><span>Warm</span><span>Cool</span></div>
         </div>
 
         <div class="control-card">
