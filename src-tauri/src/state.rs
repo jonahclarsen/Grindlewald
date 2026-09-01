@@ -224,9 +224,7 @@ impl SharedState {
                 }
             }
         });
-        Ok(format!(
-            "Breathing every {pace_seconds:.2} seconds with {hue_step_degrees:.1}° hue steps"
-        ))
+        Ok("Breathing".into())
     }
 
     async fn stop_effect(&self) -> Result<String, String> {
