@@ -74,7 +74,7 @@ On **Timers**, create an automation, choose its daily local time and preset, the
 
 An automation may also run a shell command through `/bin/zsh -lc`. The command is stored only in the local settings file. Use this only for commands you trust; it intentionally has the same permissions as your user account. **Test light + script now** saves the automation and runs both halves immediately.
 
-## Start automatically in dev mode
+## Start automatically as a debug app
 
 To install the included per-user LaunchAgent:
 
@@ -82,7 +82,9 @@ To install the included per-user LaunchAgent:
 ./scripts/install-launch-agent.sh
 ```
 
-It runs `pnpm tauri dev` at login, restarts it if it exits, and writes logs under `~/Library/Logs/Grindlewald`. Re-running the installer safely refreshes the agent after moving the repository.
+The installer builds a debug-mode `Grindlewald.app`, copies it to `~/Applications`, and registers a per-user LaunchAgent that runs its bundled executable at login and restarts it if it exits. The agent is explicitly associated with the Grindlewald bundle identifier, so both Bluetooth permission and the System Settings Background Items entry use **Grindlewald** instead of a shell or launcher name. Logs are written under `~/Library/Logs/Grindlewald`.
+
+Re-run the installer after changing source code to rebuild and refresh the installed debug app. The login process itself does not need shell or Documents-folder permission.
 
 Remove it with:
 
