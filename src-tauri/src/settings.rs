@@ -156,16 +156,18 @@ impl Default for Settings {
 
 impl Settings {
     fn migrate_breathing_defaults(&mut self) {
-        if self.breathing_defaults_version != 0 {
-            return;
+        if self.breathing_defaults_version == 0 {
+            if self.breathing_pace_seconds == 2.0 {
+                self.breathing_pace_seconds = default_breathing_pace_seconds();
+            }
+            if self.breathing_hue_step_degrees == 12.0 {
+                self.breathing_hue_step_degrees = default_breathing_hue_step_degrees();
+            }
+            self.breathing_defaults_version = 1;
         }
-        if self.breathing_pace_seconds == 2.0 {
-            self.breathing_pace_seconds = default_breathing_pace_seconds();
+        if self.breathing_pace_seconds > 2.0 {
+            self.breathing_pace_seconds = 2.0;
         }
-        if self.breathing_hue_step_degrees == 12.0 {
-            self.breathing_hue_step_degrees = default_breathing_hue_step_degrees();
-        }
-        self.breathing_defaults_version = 1;
     }
 
     pub fn canonicalize_identifiers(&mut self) {
@@ -340,6 +342,21 @@ mod tests {
         settings.breathing_pace_seconds = 0.1;
         settings.breathing_hue_step_degrees = 0.05;
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn loading_clamps_breathing_pace_to_current_maximum() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let settings = Settings {
+            breathing_pace_seconds: 2.75,
+            ..Settings::default()
+        };
+        fs::write(&path, serde_json::to_string(&settings).unwrap()).unwrap();
+
+        let settings = load(&path).unwrap();
+
+        assert_eq!(settings.breathing_pace_seconds, 2.0);
     }
 
     #[test]
