@@ -67,10 +67,10 @@ enum CliCommand {
     },
     /// Start a slow color-breathing effect.
     Breathe {
-        #[arg(long, default_value_t = 2.0, value_parser = clap::value_parser!(f32))]
+        #[arg(long, default_value_t = 0.75, value_parser = clap::value_parser!(f32))]
         pace: f32,
-        /// Degrees to move around the hue wheel after each update (1-120).
-        #[arg(long, default_value_t = 12.0, value_parser = clap::value_parser!(f32))]
+        /// Degrees to move around the hue wheel after each update (0.1-120).
+        #[arg(long, default_value_t = 2.0, value_parser = clap::value_parser!(f32))]
         hue_step: f32,
         #[arg(short, long)]
         light: Option<String>,

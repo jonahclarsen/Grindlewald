@@ -10,8 +10,8 @@ const demoSettings = {
   white: "#ffd5ad",
   brightness: 0.4,
   connectionHoldSeconds: 6,
-  breathingPaceSeconds: 2,
-  breathingHueStepDegrees: 12,
+  breathingPaceSeconds: 0.75,
+  breathingHueStepDegrees: 2,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -316,7 +316,7 @@ function renderAll() {
   $("#breathing-pace").value = settings.breathingPaceSeconds;
   $("#breathing-pace-output").value = `${Number(settings.breathingPaceSeconds).toFixed(2)}s`;
   $("#breathing-hue-step").value = settings.breathingHueStepDegrees;
-  $("#breathing-hue-step-output").value = `${Number(settings.breathingHueStepDegrees).toFixed(0)}°`;
+  $("#breathing-hue-step-output").value = `${Number(settings.breathingHueStepDegrees).toFixed(1)}°`;
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -505,7 +505,7 @@ $("#breathing-pace").addEventListener("change", async () => {
 });
 $("#breathing-hue-step").addEventListener("input", (event) => {
   settings.breathingHueStepDegrees = Number(event.target.value);
-  $("#breathing-hue-step-output").value = `${settings.breathingHueStepDegrees.toFixed(0)}°`;
+  $("#breathing-hue-step-output").value = `${settings.breathingHueStepDegrees.toFixed(1)}°`;
 });
 $("#breathing-hue-step").addEventListener("change", async () => {
   await save();

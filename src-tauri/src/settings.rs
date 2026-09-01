@@ -75,6 +75,8 @@ pub struct Settings {
     #[serde(default = "default_breathing_hue_step_degrees")]
     pub breathing_hue_step_degrees: f32,
     #[serde(default)]
+    pub breathing_defaults_version: u8,
+    #[serde(default)]
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub schedules: Vec<Schedule>,
@@ -97,11 +99,11 @@ fn default_connection_hold_seconds() -> u64 {
 }
 
 fn default_breathing_pace_seconds() -> f32 {
-    2.0
+    0.75
 }
 
 fn default_breathing_hue_step_degrees() -> f32 {
-    12.0
+    2.0
 }
 
 impl Default for Settings {
@@ -114,6 +116,7 @@ impl Default for Settings {
             connection_hold_seconds: default_connection_hold_seconds(),
             breathing_pace_seconds: default_breathing_pace_seconds(),
             breathing_hue_step_degrees: default_breathing_hue_step_degrees(),
+            breathing_defaults_version: 1,
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -152,6 +155,19 @@ impl Default for Settings {
 }
 
 impl Settings {
+    fn migrate_breathing_defaults(&mut self) {
+        if self.breathing_defaults_version != 0 {
+            return;
+        }
+        if self.breathing_pace_seconds == 2.0 {
+            self.breathing_pace_seconds = default_breathing_pace_seconds();
+        }
+        if self.breathing_hue_step_degrees == 12.0 {
+            self.breathing_hue_step_degrees = default_breathing_hue_step_degrees();
+        }
+        self.breathing_defaults_version = 1;
+    }
+
     pub fn canonicalize_identifiers(&mut self) {
         let mut canonical_devices = Vec::new();
         let mut configured_names = HashMap::<String, String>::new();
@@ -183,14 +199,14 @@ impl Settings {
             return Err("connection hold time must be between 1 and 60 seconds".into());
         }
         if !self.breathing_pace_seconds.is_finite()
-            || !(0.75..=15.0).contains(&self.breathing_pace_seconds)
+            || !(0.1..=15.0).contains(&self.breathing_pace_seconds)
         {
-            return Err("breathing pace must be between 0.75 and 15 seconds".into());
+            return Err("breathing pace must be between 0.1 and 15 seconds".into());
         }
         if !self.breathing_hue_step_degrees.is_finite()
-            || !(1.0..=120.0).contains(&self.breathing_hue_step_degrees)
+            || !(0.1..=120.0).contains(&self.breathing_hue_step_degrees)
         {
-            return Err("breathing hue step must be between 1 and 120 degrees".into());
+            return Err("breathing hue step must be between 0.1 and 120 degrees".into());
         }
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
@@ -254,6 +270,7 @@ pub fn load(path: &Path) -> Result<Settings, String> {
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut settings: Settings =
         serde_json::from_str(&contents).map_err(|error| error.to_string())?;
+    settings.migrate_breathing_defaults();
     settings.canonicalize_identifiers();
     settings.validate()?;
     Ok(settings)
@@ -285,6 +302,40 @@ mod tests {
         save(&path, &settings).unwrap();
         assert_eq!(load(&path).unwrap(), settings);
         assert!(!fs::read_to_string(path).unwrap().contains("identifier"));
+    }
+
+    #[test]
+    fn legacy_breathing_defaults_migrate_to_smoother_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut settings = Settings {
+            breathing_pace_seconds: 2.0,
+            breathing_hue_step_degrees: 12.0,
+            breathing_defaults_version: 0,
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+
+        settings = load(&path).unwrap();
+        assert_eq!(settings.breathing_pace_seconds, 0.75);
+        assert_eq!(settings.breathing_hue_step_degrees, 2.0);
+        assert_eq!(settings.breathing_defaults_version, 1);
+    }
+
+    #[test]
+    fn breathing_parameters_allow_fine_grained_low_values() {
+        let mut settings = Settings {
+            breathing_pace_seconds: 0.1,
+            breathing_hue_step_degrees: 0.1,
+            ..Settings::default()
+        };
+        assert!(settings.validate().is_ok());
+
+        settings.breathing_pace_seconds = 0.05;
+        assert!(settings.validate().is_err());
+        settings.breathing_pace_seconds = 0.1;
+        settings.breathing_hue_step_degrees = 0.05;
+        assert!(settings.validate().is_err());
     }
 
     #[test]

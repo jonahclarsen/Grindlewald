@@ -162,11 +162,11 @@ impl SharedState {
         hue_step_degrees: f32,
         device: Option<String>,
     ) -> Result<String, String> {
-        if !pace_seconds.is_finite() || !(0.75..=15.0).contains(&pace_seconds) {
-            return Err("breathing pace must be between 0.75 and 15 seconds".into());
+        if !pace_seconds.is_finite() || !(0.1..=15.0).contains(&pace_seconds) {
+            return Err("breathing pace must be between 0.1 and 15 seconds".into());
         }
-        if !hue_step_degrees.is_finite() || !(1.0..=120.0).contains(&hue_step_degrees) {
-            return Err("breathing hue step must be between 1 and 120 degrees".into());
+        if !hue_step_degrees.is_finite() || !(0.1..=120.0).contains(&hue_step_degrees) {
+            return Err("breathing hue step must be between 0.1 and 120 degrees".into());
         }
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
@@ -225,7 +225,7 @@ impl SharedState {
             }
         });
         Ok(format!(
-            "Breathing every {pace_seconds:.2} seconds with {hue_step_degrees:.0}° hue steps"
+            "Breathing every {pace_seconds:.2} seconds with {hue_step_degrees:.1}° hue steps"
         ))
     }
 

@@ -73,7 +73,7 @@ h3 { font-size: 14px; }
 .effect-button.active { border-color: rgba(255, 213, 43, .55); box-shadow: 0 0 14px rgba(183, 44, 255, .2); }
 .pace-control { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 10px; }
 .pace-control input { min-width: 0; accent-color: var(--purple); }
-.pace-control output { width: 36px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.pace-control output { width: 44px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 button { cursor: pointer; }
 .primary, .secondary { border-radius: 10px; padding: 9px 12px; font-weight: 600; border: 1px solid transparent; }
 .primary { background: linear-gradient(135deg, #a481ef, #7355ca); }

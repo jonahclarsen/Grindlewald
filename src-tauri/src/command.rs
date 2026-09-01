@@ -54,7 +54,7 @@ pub enum ControlCommand {
 }
 
 fn default_breathing_hue_step_degrees() -> f32 {
-    12.0
+    2.0
 }
 
 impl ControlCommand {
