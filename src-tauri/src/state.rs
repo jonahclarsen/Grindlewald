@@ -180,7 +180,7 @@ impl SharedState {
                 return Err(error);
             }
         };
-        let mut hue = hue_from_rgb(crate::protocol::parse_hex_color(&settings.color)?);
+        let mut hue = random_hue();
         if let Err(error) = self
             .controller
             .lock()
@@ -402,24 +402,8 @@ fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<Contro
     })
 }
 
-fn hue_from_rgb([red, green, blue]: [u8; 3]) -> f32 {
-    let red = f32::from(red) / 255.0;
-    let green = f32::from(green) / 255.0;
-    let blue = f32::from(blue) / 255.0;
-    let maximum = red.max(green).max(blue);
-    let minimum = red.min(green).min(blue);
-    let difference = maximum - minimum;
-    if difference == 0.0 {
-        return 0.0;
-    }
-    let hue = if maximum == red {
-        ((green - blue) / difference) % 6.0
-    } else if maximum == green {
-        (blue - red) / difference + 2.0
-    } else {
-        (red - green) / difference + 4.0
-    };
-    (hue * 60.0 + 360.0) % 360.0
+fn random_hue() -> f32 {
+    fastrand::f32() * 360.0
 }
 
 fn color_at_hue(hue: f32) -> String {
@@ -438,7 +422,7 @@ fn color_at_hue(hue: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{color_at_hue, hue_from_rgb};
+    use super::{color_at_hue, random_hue};
 
     #[test]
     fn breathing_colors_move_continuously_around_the_hue_wheel() {
@@ -446,6 +430,12 @@ mod tests {
         assert_eq!(color_at_hue(60.0), "#ffff00");
         assert_eq!(color_at_hue(120.0), "#00ff00");
         assert_eq!(color_at_hue(360.0), "#ff0000");
-        assert!((hue_from_rgb([255, 79, 34]) - 12.2).abs() < 0.1);
+    }
+
+    #[test]
+    fn random_breathing_hues_stay_on_the_color_wheel() {
+        for _ in 0..100 {
+            assert!((0.0..360.0).contains(&random_hue()));
+        }
     }
 }

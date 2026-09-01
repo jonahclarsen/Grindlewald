@@ -76,7 +76,7 @@ grindlewaldctl stop-party
 
 # Slowly breathe between colors; smaller hue steps make each transition subtler
 grindlewaldctl breathe --pace 1 --hue-step 6
-grindlewaldctl breathe --pace 4 --hue-step 18 --light Bedroom
+grindlewaldctl breathe --pace 2 --hue-step 18 --light Bedroom
 grindlewaldctl stop-effect
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
@@ -124,7 +124,7 @@ The two profiles deliberately encode white differently:
 - **Classic / H6001:** mode `0x02`, `FF FF FF`, a dedicated-white flag, then the selected white RGB value.
 - **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
 
-The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: it starts at the currently selected hue, advances by the selected 0.1–120° hue step at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 2° every 0.75 seconds. A smaller hue step makes adjacent updates more alike and takes longer to complete a full color-wheel cycle. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
+The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: each session starts at a random hue, advances by the selected 0.1–120° hue step at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 2° every 0.75 seconds. A smaller hue step makes adjacent updates more alike and takes longer to complete a full color-wheel cycle. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
 
 While the configured connection window is active, Grindlewald sends the captured `AA 01 … AB` no-op every two seconds. This keeps H6005 links alive beyond their roughly 15-second idle timeout without changing light state.
 
