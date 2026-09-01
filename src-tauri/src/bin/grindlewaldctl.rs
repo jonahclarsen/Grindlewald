@@ -65,8 +65,23 @@ enum CliCommand {
         #[arg(short, long)]
         light: Option<String>,
     },
+    /// Start a slow color-breathing effect.
+    Breathe {
+        #[arg(long, default_value_t = 2.0, value_parser = clap::value_parser!(f32))]
+        pace: f32,
+        #[arg(short, long)]
+        light: Option<String>,
+    },
     /// Stop party mode and restore the selected static color.
     StopParty,
+    /// Stop any running party or breathing effect.
+    StopEffect,
+    /// Try raw hexadecimal bytes after the safe 33 05 color/mode prefix.
+    Experiment {
+        payload: String,
+        #[arg(short, long)]
+        light: String,
+    },
 }
 
 #[tokio::main]
@@ -106,7 +121,16 @@ async fn main() -> anyhow::Result<()> {
             device: light,
         },
         CliCommand::Party { light } => ControlCommand::Party { device: light },
+        CliCommand::Breathe { pace, light } => ControlCommand::Breathe {
+            pace_seconds: pace,
+            device: light,
+        },
         CliCommand::StopParty => ControlCommand::StopParty,
+        CliCommand::StopEffect => ControlCommand::StopEffect,
+        CliCommand::Experiment { payload, light } => ControlCommand::Experiment {
+            payload,
+            device: Some(light),
+        },
     };
 
     let path = socket_path();

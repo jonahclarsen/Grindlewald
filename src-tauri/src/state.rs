@@ -54,11 +54,24 @@ impl SharedState {
     }
 
     pub async fn execute(&self, command: ControlCommand) -> Result<String, String> {
+        if matches!(&command, ControlCommand::Experiment { device: None, .. }) {
+            return Err("experimental commands must target one named light".into());
+        }
         if let ControlCommand::Party { device } = &command {
             return self.start_party(device.clone()).await;
         }
-        if matches!(command, ControlCommand::StopParty) {
-            return self.stop_party().await;
+        if let ControlCommand::Breathe {
+            pace_seconds,
+            device,
+        } = &command
+        {
+            return self.start_breathing(*pace_seconds, device.clone()).await;
+        }
+        if matches!(
+            command,
+            ControlCommand::StopParty | ControlCommand::StopEffect
+        ) {
+            return self.stop_effect().await;
         }
         self.party_active.store(false, Ordering::SeqCst);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
@@ -80,7 +93,13 @@ impl SharedState {
         }
         let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
-        let settings = self.load_settings()?;
+        let settings = match self.load_settings() {
+            Ok(settings) => settings,
+            Err(error) => {
+                self.party_active.store(false, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
         if let Err(error) = self
             .controller
             .lock()
@@ -134,7 +153,77 @@ impl SharedState {
         Ok("Party mode started".into())
     }
 
-    async fn stop_party(&self) -> Result<String, String> {
+    async fn start_breathing(
+        &self,
+        pace_seconds: f32,
+        device: Option<String>,
+    ) -> Result<String, String> {
+        if !pace_seconds.is_finite() || !(0.75..=15.0).contains(&pace_seconds) {
+            return Err("breathing pace must be between 0.75 and 15 seconds".into());
+        }
+        if self.party_active.swap(true, Ordering::SeqCst) {
+            return Ok("An effect is already running".into());
+        }
+        let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.activity_generation.fetch_add(1, Ordering::SeqCst);
+        let settings = match self.load_settings() {
+            Ok(settings) => settings,
+            Err(error) => {
+                self.party_active.store(false, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
+        const COLORS: [&str; 7] = [
+            "#ff315e", "#8b55ff", "#337dff", "#27cfff", "#35e59b", "#ffd04a", "#ff7138",
+        ];
+        if let Err(error) = self
+            .controller
+            .lock()
+            .await
+            .apply(
+                &settings,
+                &ControlCommand::BreathingFrame {
+                    value: COLORS[0].into(),
+                    device: device.clone(),
+                },
+            )
+            .await
+        {
+            self.party_active.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+
+        let state = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut color_index = 1;
+            loop {
+                tokio::time::sleep(Duration::from_secs_f32(pace_seconds)).await;
+                if state.party_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let command = ControlCommand::BreathingFrame {
+                    value: COLORS[color_index].into(),
+                    device: device.clone(),
+                };
+                if state
+                    .controller
+                    .lock()
+                    .await
+                    .apply(&settings, &command)
+                    .await
+                    .is_err()
+                {
+                    state.party_generation.fetch_add(1, Ordering::SeqCst);
+                    state.party_active.store(false, Ordering::SeqCst);
+                    break;
+                }
+                color_index = (color_index + 1) % COLORS.len();
+            }
+        });
+        Ok(format!("Breathing every {pace_seconds:.2} seconds"))
+    }
+
+    async fn stop_effect(&self) -> Result<String, String> {
         self.party_active.store(false, Ordering::SeqCst);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
@@ -150,7 +239,7 @@ impl SharedState {
             .apply(&settings, &command)
             .await;
         self.arm_idle_disconnect(settings.connection_hold_seconds);
-        result.map(|_| "Party mode stopped".into())
+        result.map(|_| "Effect stopped".into())
     }
 
     pub async fn run_schedule_by_id(&self, id: &str) -> Result<String, String> {
@@ -188,17 +277,35 @@ impl SharedState {
         };
 
         let shell_command = schedule.shell_command.trim().to_owned();
+        let run_as_administrator = schedule.run_as_administrator;
         let shell = async move {
             if shell_command.is_empty() {
                 return Ok::<String, String>("No shell command".into());
             }
-            let output = tokio::process::Command::new("/bin/zsh")
-                .args(["-lc", &shell_command])
+            let (mut process, success_message) = if run_as_administrator {
+                let mut process = tokio::process::Command::new("/usr/bin/osascript");
+                process.args([
+                    "-e",
+                    "on run argv",
+                    "-e",
+                    "do shell script (\"/bin/zsh -lc \" & quoted form of (item 1 of argv)) with administrator privileges",
+                    "-e",
+                    "end run",
+                    "--",
+                    &shell_command,
+                ]);
+                (process, "Administrator command completed")
+            } else {
+                let mut process = tokio::process::Command::new("/bin/zsh");
+                process.args(["-lc", &shell_command]);
+                (process, "Shell command completed")
+            };
+            let output = process
                 .output()
                 .await
                 .map_err(|error| format!("could not start shell command: {error}"))?;
             if output.status.success() {
-                Ok("Shell command completed".into())
+                Ok(success_message.into())
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
                 Err(format!("shell command failed: {stderr}"))

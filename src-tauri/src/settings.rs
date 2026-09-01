@@ -49,6 +49,8 @@ pub struct Schedule {
     pub preset: String,
     #[serde(default)]
     pub shell_command: String,
+    #[serde(default)]
+    pub run_as_administrator: bool,
 }
 
 fn enabled_by_default() -> bool {
@@ -68,6 +70,8 @@ pub struct Settings {
     pub brightness: f32,
     #[serde(default = "default_connection_hold_seconds")]
     pub connection_hold_seconds: u64,
+    #[serde(default = "default_breathing_pace_seconds")]
+    pub breathing_pace_seconds: f32,
     #[serde(default)]
     pub presets: Vec<Preset>,
     #[serde(default)]
@@ -90,6 +94,10 @@ fn default_connection_hold_seconds() -> u64 {
     6
 }
 
+fn default_breathing_pace_seconds() -> f32 {
+    2.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -98,6 +106,7 @@ impl Default for Settings {
             white: default_white(),
             brightness: default_brightness(),
             connection_hold_seconds: default_connection_hold_seconds(),
+            breathing_pace_seconds: default_breathing_pace_seconds(),
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -165,6 +174,11 @@ impl Settings {
         }
         if !(1..=60).contains(&self.connection_hold_seconds) {
             return Err("connection hold time must be between 1 and 60 seconds".into());
+        }
+        if !self.breathing_pace_seconds.is_finite()
+            || !(0.75..=15.0).contains(&self.breathing_pace_seconds)
+        {
+            return Err("breathing pace must be between 0.75 and 15 seconds".into());
         }
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
@@ -309,6 +323,7 @@ mod tests {
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],
                 preset: "daytime".into(),
                 shell_command: String::new(),
+                run_as_administrator: false,
             }],
             ..Settings::default()
         };

@@ -40,11 +40,48 @@
             <button class="secondary" data-power="false">Lights off</button>
             <button class="primary" data-power="true">Lights on</button>
           </div>
-          <button id="party-button" class="party-button" aria-pressed="false">Start party mode</button>
+          <div class="effect-row">
+            <button id="party-button" class="effect-button" aria-pressed="false">Party</button>
+            <button id="breathing-button" class="effect-button" aria-pressed="false">Breathe</button>
+          </div>
+          <label class="pace-control"><span>Breathing pace</span><input id="breathing-pace" type="range" min="0.75" max="15" step="0.25"><output id="breathing-pace-output">2.00s</output></label>
         </div>
 
         <div class="section-heading"><h3>Presets</h3><button class="text-button" data-page-link="settings-page">Edit</button></div>
         <div id="quick-presets" class="preset-chips"></div>
+
+        <details class="experimental-card">
+          <summary><span><strong>Experimental modes</strong><small>Try possible scene and music packets</small></span><span class="disclosure">›</span></summary>
+          <div class="experimental-body">
+            <label class="field full">Candidate<select id="experimental-candidate">
+              <option value="04 00">H6001 · Sunrise</option>
+              <option value="04 01">H6001 · Sunset</option>
+              <option value="04 04">H6001 · Movie</option>
+              <option value="04 05">H6001 · Dating</option>
+              <option value="04 07">H6001 · Romantic</option>
+              <option value="04 08">H6001 · Blinking</option>
+              <option value="04 09">H6001 · Candlelight</option>
+              <option value="04 0F">H6001 · Snowflake</option>
+              <option value="01 00">H6001 · Music Energic</option>
+              <option value="01 01 00 FF 30 70">H6001 · Music Spectrum</option>
+              <option value="01 02 00 30 70 FF">H6001 · Music Rolling</option>
+              <option value="01 03">H6001 · Music Rhythm</option>
+              <option value="13 05 64">Other Govee · Music Energic</option>
+              <option value="13 03 64">Other Govee · Music Rhythm</option>
+              <option value="13 04 64">Other Govee · Music Spectrum</option>
+              <option value="13 06 64">Other Govee · Music Rolling</option>
+            </select></label>
+            <div class="field-grid">
+              <label class="field">Target<select id="experimental-target"></select></label>
+              <label class="field">Payload after <code>33 05</code><input id="experimental-payload" value="04 00" spellcheck="false"></label>
+            </div>
+            <div class="power-row">
+              <button id="experimental-test" class="primary">Try packet</button>
+              <button id="experimental-restore" class="secondary">Restore color</button>
+            </div>
+            <div class="warning">Unknown modes may be ignored or leave a light in an unusual state. This tester cannot write firmware or OTA characteristics.</div>
+          </div>
+        </details>
       </section>
 
       <section id="automations-page" class="page">

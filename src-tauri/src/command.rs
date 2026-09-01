@@ -30,10 +30,23 @@ pub enum ControlCommand {
     Party {
         device: Option<String>,
     },
+    Breathe {
+        pace_seconds: f32,
+        device: Option<String>,
+    },
     StopParty,
+    StopEffect,
     PartyFrame {
         value: String,
         enter: bool,
+        device: Option<String>,
+    },
+    BreathingFrame {
+        value: String,
+        device: Option<String>,
+    },
+    Experiment {
+        payload: String,
         device: Option<String>,
     },
 }
@@ -47,8 +60,11 @@ impl ControlCommand {
             | Self::Power { device, .. }
             | Self::Preset { device, .. }
             | Self::Party { device }
-            | Self::PartyFrame { device, .. } => device.as_deref(),
-            Self::StopParty => None,
+            | Self::Breathe { device, .. }
+            | Self::PartyFrame { device, .. }
+            | Self::BreathingFrame { device, .. }
+            | Self::Experiment { device, .. } => device.as_deref(),
+            Self::StopParty | Self::StopEffect => None,
         }
     }
 }

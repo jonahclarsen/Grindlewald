@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::{
     command::ControlCommand,
     protocol::{
-        CONTROL_CHARACTERISTIC, brightness_frame, color_frame, keep_alive_frame, parse_hex_color,
-        party_frames, power_frame, white_frame,
+        CONTROL_CHARACTERISTIC, brightness_frame, color_frame, experimental_mode_frame,
+        keep_alive_frame, parse_hex_color, party_frames, power_frame, white_frame,
     },
     settings::{DeviceConfig, Settings},
 };
@@ -312,12 +312,19 @@ fn frames_for(
         ControlCommand::Preset { .. } => {
             Err("preset commands must be resolved before reaching Bluetooth".into())
         }
-        ControlCommand::Party { .. } | ControlCommand::StopParty => {
-            Err("party commands must be resolved before reaching Bluetooth".into())
+        ControlCommand::Party { .. }
+        | ControlCommand::Breathe { .. }
+        | ControlCommand::StopParty
+        | ControlCommand::StopEffect => {
+            Err("effect commands must be resolved before reaching Bluetooth".into())
         }
         ControlCommand::PartyFrame { value, enter, .. } => {
             Ok(party_frames(profile, parse_hex_color(value)?, *enter))
         }
+        ControlCommand::BreathingFrame { value, .. } => {
+            Ok(vec![color_frame(profile, parse_hex_color(value)?)])
+        }
+        ControlCommand::Experiment { payload, .. } => Ok(vec![experimental_mode_frame(payload)?]),
     }
 }
 

@@ -16,11 +16,14 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Configurable BLE connection hold time, making follow-up color changes fast
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
+- Adjustable 0.75–15 second breathing mode that uses H6005's native fades between colors
+- A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
+- Compact preset and light rows that expand for editing and collapse when you click elsewhere
 - Bluetooth discovery plus add, edit, enable, and remove controls for individual lights; existing matches remain visible and are labeled as already added
 - Bluetooth identifiers are displayed and stored in uppercase but matched case-insensitively for discovery and live connections
 - Daily local-time automations targeting one, several, or all enabled lights
-- Optional trusted shell command run alongside an automation, with a full Test button
+- Optional trusted shell command run alongside an automation as the user or through a native macOS administrator prompt, with a full Test button
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too
 - Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, and Escape to dismiss
 
@@ -71,6 +74,14 @@ grindlewaldctl party
 grindlewaldctl party --light Bedroom
 grindlewaldctl stop-party
 
+# Slowly breathe between colors, with an adjustable interval
+grindlewaldctl breathe --pace 2.5
+grindlewaldctl breathe --pace 4 --light Bedroom
+grindlewaldctl stop-effect
+
+# Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
+grindlewaldctl experiment '04 08' --light Bedroom
+
 # Brightness and power
 grindlewaldctl brightness 0.2
 grindlewaldctl power off --light Bedroom
@@ -82,7 +93,9 @@ Brightness values range from `0.0` through `1.0`. Preset and light names are cas
 
 On **Automations**, create an automation, choose its daily local time and preset, then select any number of lights. Selecting no lights means all enabled lights. The scheduler runs inside the menu-bar process, so keep Grindlewald running.
 
-An automation may also run a shell command through `/bin/zsh -lc`. The command is stored only in the local settings file. Use this only for commands you trust; it intentionally has the same permissions as your user account. **Test light + script now** saves the automation and runs both halves immediately.
+An automation may also run a shell command through `/bin/zsh -lc`. Enable **Run as administrator** to have macOS request administrator authorization and execute that command as root. The authorization dialog appears when the automation runs, so unattended root automations instead need an explicitly configured, tightly scoped `sudo -n`/`sudoers` rule. Grindlewald never stores an administrator password.
+
+The command is stored only in the local settings file. Use this only for commands you trust. **Test light + script now** saves the automation and runs both halves immediately, including the authorization prompt when enabled.
 
 ## Start automatically as a debug app
 
@@ -111,13 +124,13 @@ The two profiles deliberately encode white differently:
 - **Classic / H6001:** mode `0x02`, `FF FF FF`, a dedicated-white flag, then the selected white RGB value.
 - **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
 
-The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Classic lights receive rapid `0x02` RGB frames. Choosing any normal control stops the effect; **Stop party mode** restores the currently selected static color.
+The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: it sends ordinary colors at the selected 0.75–15 second pace and lets the bulb produce its smooth native fade. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
 
 While the configured connection window is active, Grindlewald sends the captured `AA 01 … AB` no-op every two seconds. This keeps H6005 links alive beyond their roughly 15-second idle timeout without changing light state.
 
 Protocol references: [H6005 write-up](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6005.md), [captured H6004/H6005 command set](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6004.md), [H6001/H6127 command set and scenes](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6127.md), and [classic H6001 controller](https://github.com/chvolkmann/govee_btled).
 
-H6001 has documented built-in music, scene, and DIY packets. H6005 has confirmed instant music streaming but its scene and DIY payloads remain undocumented, so Grindlewald does not send guessed scene packets. Its local party stream is predictable on both supported profiles.
+H6001 has documented built-in music, scene, and DIY packets. H6005 has confirmed instant music streaming but its scene and DIY payloads remain undocumented. The collapsed **Experimental modes** panel provides known H6001 candidates, some newer-Govee music candidates, and an editable hexadecimal payload. It always fixes the outer command to `33 05`, writes only the normal light-control characteristic, targets one selected light, and cannot access firmware or OTA characteristics. Use **Restore color** if a trial leaves a bulb in an unexpected mode.
 
 ## Privacy and repository safety
 

@@ -10,6 +10,7 @@ const demoSettings = {
   white: "#ffd5ad",
   brightness: 0.4,
   connectionHoldSeconds: 6,
+  breathingPaceSeconds: 2,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -18,7 +19,7 @@ const demoSettings = {
     { name: "crashtime", mode: "color", value: "#ff4500", brightness: 0 },
   ],
   schedules: [
-    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", shellCommand: "shortcuts run 'Wind Down'" },
+    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: false },
   ],
 };
 
@@ -26,7 +27,8 @@ let settings;
 let discovered = [];
 let pendingControl = null;
 let sendingControl = false;
-let partyActive = false;
+let activeEffect = null;
+let expandedEditorKey = null;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
@@ -155,7 +157,7 @@ function setStatus(message, kind = "ready") {
 function setDiscoveryBusy(isBusy) {
   const button = $("#discover-button");
   button.disabled = isBusy;
-  button.innerHTML = isBusy ? '<span class="spinner"></span>Scanning…' : "Discover";
+  button.textContent = isBusy ? "Scanning…" : "Discover";
   button.setAttribute("aria-busy", String(isBusy));
   if (isBusy) {
     $("#discovered-devices").innerHTML = '<div class="discovery-progress"><span class="spinner"></span><span>Looking for nearby lights…</span></div>';
@@ -184,7 +186,7 @@ async function save() {
 }
 
 async function queueControl(command) {
-  setPartyActive(false);
+  setEffectActive(null);
   pendingControl = command;
   if (sendingControl) return;
   sendingControl = true;
@@ -202,12 +204,15 @@ async function queueControl(command) {
   sendingControl = false;
 }
 
-function setPartyActive(active) {
-  partyActive = active;
-  const button = $("#party-button");
-  button.classList.toggle("active", active);
-  button.setAttribute("aria-pressed", String(active));
-  button.textContent = active ? "Stop party mode" : "Start party mode";
+function setEffectActive(effect) {
+  activeEffect = effect;
+  [["#party-button", "party", "Party"], ["#breathing-button", "breathe", "Breathe"]].forEach(([selector, name, label]) => {
+    const button = $(selector);
+    const active = effect === name;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.textContent = active ? `Stop ${label.toLowerCase()}` : label;
+  });
 }
 
 function showPage(pageId) {
@@ -223,14 +228,18 @@ function renderQuickPresets() {
 
 function renderPresets() {
   $("#preset-editor").innerHTML = settings.presets.length ? settings.presets.map((preset, index) => {
+    const editorKey = `preset:${index}`;
+    if (expandedEditorKey !== editorKey) {
+      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="swatch" style="background:${escapeHtml(preset.value)}"></span><span class="summary-copy"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><small>${preset.mode === "color" ? "Color" : "White"} · ${Math.round(preset.brightness * 100)}%</small></span><span class="disclosure">›</span></button>`;
+    }
     const colorPosition = preset.mode === "color"
       ? Math.round(hueFromHex(preset.value))
       : Math.round(whitePositionFromHex(preset.value) * 100);
     const colorClass = preset.mode === "color" ? "preset-hue-range" : "preset-white-range";
     const colorMaximum = preset.mode === "color" ? 360 : 100;
     return `
-    <article class="editor-card" data-preset-index="${index}">
-      <div class="card-title"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><button class="remove-button" data-remove-preset="${index}">Remove</button></div>
+    <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-preset-index="${index}">
+      <div class="card-title"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset">›</button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-preset-field="name" value="${escapeHtml(preset.name)}"></label>
         <label class="field">Mode<select data-preset-field="mode"><option value="color" ${preset.mode === "color" ? "selected" : ""}>Color</option><option value="white" ${preset.mode === "white" ? "selected" : ""}>White</option></select></label>
@@ -252,22 +261,29 @@ function renderSchedules() {
         <label class="field full">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
+        <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run as administrator</label>
       </div>
-      <div class="warning">Runs locally through <code>/bin/zsh -lc</code>. Only enter commands you trust.</div>
+      <div class="warning">${schedule.runAsAdministrator ? "macOS will request administrator authorization when this runs." : "Runs locally through <code>/bin/zsh -lc</code>."} Only enter commands you trust.</div>
       <button class="secondary" data-test-schedule="${escapeHtml(schedule.id)}">Test light + script now</button>
     </article>`).join("") : '<div class="empty">No automations yet. Add one with ＋.</div>';
 }
 
 function renderDevices() {
-  $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => `
-    <article class="editor-card" data-device-index="${index}">
-      <div class="card-title"><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><button class="remove-button" data-remove-device="${index}">Remove</button></div>
+  $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => {
+    const editorKey = `device:${index}`;
+    if (expandedEditorKey !== editorKey) {
+      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${escapeHtml(canonicalIdentifier(device.identifier))}</small></span><span class="disclosure">›</span></button>`;
+    }
+    return `
+    <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
+      <div class="card-title"><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light">›</button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
         <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic (H6001)</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
         <label class="field full">Bluetooth identifier<input class="identifier-input" data-device-field="identifier" value="${escapeHtml(canonicalIdentifier(device.identifier))}" spellcheck="false"></label>
       </div>
-    </article>`).join("") : '<div class="empty">No lights connected.</div>';
+    </article>`;
+  }).join("") : '<div class="empty">No lights connected.</div>';
 
   $("#discovered-devices").innerHTML = discovered.map((device, index) => {
     const configuredDevice = configuredDeviceFor(device);
@@ -281,16 +297,28 @@ function renderDevices() {
   }).join("");
 }
 
+function renderExperimentTargets() {
+  const target = $("#experimental-target");
+  target.innerHTML = settings.devices
+    .filter((device) => device.enabled)
+    .map((device) => `<option value="${escapeHtml(device.name)}">${escapeHtml(device.name)} · ${device.profile === "h6005" ? "H6005" : "H6001"}</option>`)
+    .join("") || '<option value="">No enabled lights</option>';
+  $("#experimental-test").disabled = !settings.devices.some((device) => device.enabled);
+}
+
 function renderAll() {
   updateHue(hueFromHex(settings.color), false);
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
+  $("#breathing-pace").value = settings.breathingPaceSeconds;
+  $("#breathing-pace-output").value = `${Number(settings.breathingPaceSeconds).toFixed(2)}s`;
   renderQuickPresets();
   renderPresets();
   renderSchedules();
   renderDevices();
+  renderExperimentTargets();
 }
 
 function uniqueId() {
@@ -298,6 +326,27 @@ function uniqueId() {
 }
 
 document.addEventListener("click", async (event) => {
+  const collapseEditor = event.target.closest("[data-collapse-editor]");
+  if (collapseEditor) {
+    expandedEditorKey = null;
+    renderPresets();
+    renderDevices();
+    return;
+  }
+  const expandEditor = event.target.closest("[data-expand-editor]");
+  if (expandEditor) {
+    expandedEditorKey = expandEditor.dataset.expandEditor;
+    renderPresets();
+    renderDevices();
+    return;
+  }
+  const clickedEditor = event.target.closest("[data-editor-key]");
+  if (expandedEditorKey && clickedEditor?.dataset.editorKey !== expandedEditorKey) {
+    expandedEditorKey = null;
+    renderPresets();
+    renderDevices();
+  }
+
   const pageButton = event.target.closest("[data-page], [data-page-link]");
   if (pageButton) showPage(pageButton.dataset.page || pageButton.dataset.pageLink);
 
@@ -309,6 +358,7 @@ document.addEventListener("click", async (event) => {
 
   const removePreset = event.target.closest("[data-remove-preset]");
   if (removePreset) {
+    expandedEditorKey = null;
     const [removed] = settings.presets.splice(Number(removePreset.dataset.removePreset), 1);
     settings.schedules = settings.schedules.filter((schedule) => schedule.preset !== removed.name);
     await save(); renderAll();
@@ -317,6 +367,7 @@ document.addEventListener("click", async (event) => {
   if (removeSchedule) { settings.schedules.splice(Number(removeSchedule.dataset.removeSchedule), 1); await save(); renderSchedules(); }
   const removeDevice = event.target.closest("[data-remove-device]");
   if (removeDevice) {
+    expandedEditorKey = null;
     const [removed] = settings.devices.splice(Number(removeDevice.dataset.removeDevice), 1);
     settings.schedules.forEach((schedule) => { schedule.lights = schedule.lights.filter((name) => name !== removed.name); });
     await save(); renderAll();
@@ -332,6 +383,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     settings.devices.push({ ...device, identifier: canonicalIdentifier(device.identifier), profile: protocolForDeviceName(device.name), enabled: true });
+    expandedEditorKey = `device:${settings.devices.length - 1}`;
     await save(); renderAll();
   }
 
@@ -406,28 +458,65 @@ $("#brightness").addEventListener("input", (event) => {
 });
 $("#brightness").addEventListener("change", save);
 
-$("#party-button").addEventListener("click", async () => {
-  const starting = !partyActive;
-  setStatus(starting ? "Starting party mode…" : "Stopping party mode…", "busy");
+async function toggleEffect(effect) {
+  const starting = activeEffect !== effect;
+  setStatus(starting ? `Starting ${effect}…` : `Stopping ${effect}…`, "busy");
   try {
+    if (starting && activeEffect) {
+      await call("execute_control", { command: { command: "stop_effect" } });
+      setEffectActive(null);
+    }
     const message = await call("execute_control", {
-      command: starting ? { command: "party", device: null } : { command: "stop_party" },
+      command: starting
+        ? effect === "party"
+          ? { command: "party", device: null }
+          : { command: "breathe", pace_seconds: settings.breathingPaceSeconds, device: null }
+        : { command: "stop_effect" },
     });
-    setPartyActive(starting);
+    setEffectActive(starting ? effect : null);
     setStatus(message);
   } catch (error) {
-    setPartyActive(false);
+    setEffectActive(null);
     setStatus(String(error), "error");
   }
+}
+
+$("#party-button").addEventListener("click", () => toggleEffect("party"));
+$("#breathing-button").addEventListener("click", () => toggleEffect("breathe"));
+$("#breathing-pace").addEventListener("input", (event) => {
+  settings.breathingPaceSeconds = Number(event.target.value);
+  $("#breathing-pace-output").value = `${settings.breathingPaceSeconds.toFixed(2)}s`;
+});
+$("#breathing-pace").addEventListener("change", async () => {
+  await save();
+  if (activeEffect === "breathe") {
+    await call("execute_control", { command: { command: "stop_effect" } });
+    setEffectActive(null);
+    await toggleEffect("breathe");
+  }
+});
+
+$("#experimental-candidate").addEventListener("change", (event) => {
+  $("#experimental-payload").value = event.target.value;
+});
+$("#experimental-test").addEventListener("click", () => {
+  const device = $("#experimental-target").value;
+  if (!device) return setStatus("Choose an enabled light", "error");
+  queueControl({ command: "experiment", payload: $("#experimental-payload").value.trim(), device });
+});
+$("#experimental-restore").addEventListener("click", () => {
+  const device = $("#experimental-target").value || null;
+  queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device });
 });
 
 $("#add-preset").addEventListener("click", async () => {
   settings.presets.push({ name: `preset-${settings.presets.length + 1}`, mode: "color", value: "#8e72e8", brightness: 0.5 });
+  expandedEditorKey = `preset:${settings.presets.length - 1}`;
   await save(); renderAll();
 });
 $("#add-schedule").addEventListener("click", async () => {
   if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "" });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "", runAsAdministrator: false });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {

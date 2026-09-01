@@ -59,6 +59,23 @@ pub fn party_frames(profile: DeviceProfile, rgb: [u8; 3], enter: bool) -> Vec<[u
     }
 }
 
+pub fn experimental_mode_frame(value: &str) -> Result<[u8; 20], String> {
+    let payload = value
+        .split_whitespace()
+        .map(|part| {
+            let byte = part.strip_prefix("0x").unwrap_or(part);
+            if byte.is_empty() || byte.len() > 2 {
+                return Err(format!("invalid experimental byte {part:?}"));
+            }
+            u8::from_str_radix(byte, 16).map_err(|_| format!("invalid experimental byte {part:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if payload.is_empty() || payload.len() > 17 {
+        return Err("experimental payload needs 1 to 17 hexadecimal bytes".into());
+    }
+    Ok(frame(0x05, &payload))
+}
+
 pub fn white_frame(profile: DeviceProfile, rgb: [u8; 3], kelvin: Option<u16>) -> [u8; 20] {
     match profile {
         DeviceProfile::Classic => frame(
@@ -185,6 +202,14 @@ mod tests {
         assert_eq!(&packets[1][..7], &[0x33, 0x05, 0x05, 0, 0xff, 0, 0]);
         assert_eq!(packets[0][19], 0x32);
         assert_eq!(packets[1][19], 0xcc);
+    }
+
+    #[test]
+    fn experimental_mode_is_limited_to_a_color_command_payload() {
+        let packet = experimental_mode_frame("04 08").unwrap();
+        assert_eq!(&packet[..5], &[0x33, 0x05, 0x04, 0x08, 0]);
+        assert_eq!(packet[19], 0x3a);
+        assert!(experimental_mode_frame("04 definitely-not-hex").is_err());
     }
 
     #[test]
