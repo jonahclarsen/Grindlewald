@@ -1,0 +1,15 @@
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/
+/.DS_Store
+/*.log
+/.env
+/.env.*
+!/.env.example
+/screenshots-private/
+
+# Device identifiers and local runtime state never belong in Git.
+/settings.json
+/devices.json
+/*.sock
+/*.plist.local

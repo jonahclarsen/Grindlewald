@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grindlewald</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header>
+        <div class="brand-mark" aria-hidden="true">G</div>
+        <div>
+          <h1>Grindlewald</h1>
+          <p class="subtitle">A little brighter, instantly.</p>
+        </div>
+        <button id="close-button" class="icon-button" aria-label="Hide window">×</button>
+      </header>
+
+      <section id="controller-page" class="page active">
+        <div class="hero-card">
+          <div class="eyebrow"><span id="connection-dot"></span><span id="status">Ready</span></div>
+          <h2>Set the mood</h2>
+          <p>Drag either color well. The light mode follows the picker automatically.</p>
+        </div>
+
+        <div class="picker-grid">
+          <label class="picker-card color-card">
+            <span class="mode-icon">✦</span>
+            <span><strong>Color</strong><small>RGB mode</small></span>
+            <input id="color-picker" type="color" value="#ff4f22" aria-label="Color-mode hue" />
+          </label>
+          <label class="picker-card white-card">
+            <span class="mode-icon">☼</span>
+            <span><strong>White</strong><small>Dedicated white LEDs</small></span>
+            <input id="white-picker" type="color" value="#ffd5ad" aria-label="White-mode hue" />
+          </label>
+        </div>
+
+        <div class="control-card">
+          <div class="control-heading"><span>Brightness</span><output id="brightness-output">40%</output></div>
+          <input id="brightness" class="range" type="range" min="0" max="100" value="40" />
+          <div class="power-row">
+            <button class="secondary" data-power="false">Lights off</button>
+            <button class="primary" data-power="true">Lights on</button>
+          </div>
+        </div>
+
+        <div class="section-heading"><h3>Presets</h3><button class="text-button" data-page-link="presets-page">Edit</button></div>
+        <div id="quick-presets" class="preset-chips"></div>
+      </section>
+
+      <section id="presets-page" class="page">
+        <div class="page-title"><div><span class="eyebrow">Your palette</span><h2>Color presets</h2></div><button id="add-preset" class="round-button">＋</button></div>
+        <p class="page-copy">Every preset works here, in schedules, and from <code>grindlewaldctl</code>.</p>
+        <div id="preset-editor" class="stack"></div>
+      </section>
+
+      <section id="automations-page" class="page">
+        <div class="page-title"><div><span class="eyebrow">Local time</span><h2>Automations</h2></div><button id="add-schedule" class="round-button">＋</button></div>
+        <p class="page-copy">Apply a preset to any lights and optionally run a shell command at the same time.</p>
+        <div id="schedule-editor" class="stack"></div>
+      </section>
+
+      <section id="settings-page" class="page">
+        <div class="page-title"><div><span class="eyebrow">Bluetooth</span><h2>Lights</h2></div><button id="discover-button" class="secondary compact">Discover</button></div>
+        <p class="page-copy">Device identifiers stay in your private Application Support folder and are never bundled with the app.</p>
+        <div id="discovered-devices" class="stack"></div>
+        <div class="section-heading"><h3>Configured lights</h3></div>
+        <div id="device-editor" class="stack"></div>
+        <button id="quit-button" class="danger-link">Quit Grindlewald</button>
+      </section>
+
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-page="controller-page"><span>◉</span>Control</button>
+        <button class="nav-item" data-page="presets-page"><span>✦</span>Presets</button>
+        <button class="nav-item" data-page="automations-page"><span>◷</span>Timers</button>
+        <button class="nav-item" data-page="settings-page"><span>⚙</span>Settings</button>
+      </nav>
+    </main>
+  </body>
+</html>
