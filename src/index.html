@@ -18,6 +18,14 @@
       <section id="controller-page" class="page active">
         <div class="controller-status eyebrow"><span id="connection-dot"></span><span id="status">Ready</span></div>
 
+        <div class="floodlight-card">
+          <span class="floodlight-title"><span class="mode-icon" aria-hidden="true">☀</span><strong>Floodlights</strong></span>
+          <div class="floodlight-actions" role="group" aria-label="Floodlights">
+            <button class="secondary compact" data-floodlights="false">Off</button>
+            <button class="primary compact" data-floodlights="true">On</button>
+          </div>
+        </div>
+
         <div class="picker-card color-card custom-picker">
           <div class="picker-title"><span class="mode-icon">✦</span><span><strong>Color</strong><small>Drag to choose a hue</small></span><span id="color-swatch" class="large-swatch"></span></div>
           <div id="hue-track" class="picker-track hue-track" role="slider" aria-label="Color hue" aria-valuemin="0" aria-valuemax="360" tabindex="0">

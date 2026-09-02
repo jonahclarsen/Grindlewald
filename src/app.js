@@ -165,6 +165,13 @@ function setDiscoveryBusy(isBusy) {
   }
 }
 
+function setFloodlightsBusy(isBusy) {
+  document.querySelectorAll("[data-floodlights]").forEach((button) => {
+    button.disabled = isBusy;
+    button.setAttribute("aria-busy", String(isBusy));
+  });
+}
+
 async function call(command, args = {}) {
   if (demoMode) {
     if (command === "get_settings") return structuredClone(demoSettings);
@@ -172,6 +179,7 @@ async function call(command, args = {}) {
       { name: "Govee H6005", identifier: "local-ble-id-1" },
       { name: "Govee new lamp", identifier: "LOCAL-DEMO-ID" },
     ];
+    if (command === "set_floodlights") return `Floodlights ${args.on ? "on" : "off"}`;
     return command === "test_schedule" ? "Updated 2 light(s). Shell command completed." : "Updated 2 light(s)";
   }
   return invoke(command, args);
@@ -367,6 +375,20 @@ document.addEventListener("click", async (event) => {
 
   const powerButton = event.target.closest("[data-power]");
   if (powerButton) queueControl({ command: "power", on: powerButton.dataset.power === "true", device: null });
+
+  const floodlightButton = event.target.closest("[data-floodlights]");
+  if (floodlightButton) {
+    const on = floodlightButton.dataset.floodlights === "true";
+    setFloodlightsBusy(true);
+    setStatus(`Turning floodlights ${on ? "on" : "off"}…`, "busy");
+    try {
+      setStatus(await call("set_floodlights", { on }));
+    } catch (error) {
+      setStatus(String(error), "error");
+    } finally {
+      setFloodlightsBusy(false);
+    }
+  }
 
   const removePreset = event.target.closest("[data-remove-preset]");
   if (removePreset) {

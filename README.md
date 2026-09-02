@@ -11,6 +11,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 ## Highlights
 
 - Native macOS menu-bar popover that anchors under its icon and hides when it loses focus
+- One-click controls for the adjacent `shortcut_set_floodlights.py` automation
 - A custom click-and-drag hue control for RGB mode and warm-to-cool slider for dedicated-white mode
 - Dragging either control switches light mode immediately
 - Configurable BLE connection hold time, making follow-up color changes fast
@@ -48,6 +49,8 @@ macOS will ask for Bluetooth permission the first time Grindlewald scans or conn
 ```
 
 That file is local runtime data. It is ignored by Git and is never compiled into the app.
+
+The Floodlights buttons run `shortcut_set_floodlights.py on` or `shortcut_set_floodlights.py off` from the parent Govee project. Grindlewald uses the `govee` Miniconda environment when it is available. Set `GRINDLEWALD_FLOODLIGHT_SCRIPT` or `GRINDLEWALD_FLOODLIGHT_PYTHON` in the app environment to override either path without storing machine-specific configuration in this repository.
 
 ## Command-line control
 

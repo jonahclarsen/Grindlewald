@@ -5,6 +5,8 @@ pub mod protocol;
 pub mod settings;
 pub mod state;
 
+use std::{env, path::PathBuf};
+
 use ble::DiscoveredDevice;
 use command::ControlCommand;
 use settings::Settings;
@@ -69,6 +71,73 @@ async fn execute_control(
 #[tauri::command]
 async fn test_schedule(id: String, state: tauri::State<'_, SharedState>) -> Result<String, String> {
     state.run_schedule_by_id(&id).await
+}
+
+fn floodlight_script_path() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("GRINDLEWALD_FLOODLIGHT_SCRIPT").map(PathBuf::from)
+        && path.is_file()
+    {
+        return Ok(path);
+    }
+
+    let mut candidates = Vec::new();
+    if let Some(repo) = env::var_os("GRINDLEWALD_REPO").map(PathBuf::from) {
+        candidates.push(
+            repo.parent()
+                .map(|path| path.join("shortcut_set_floodlights.py")),
+        );
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|repo| repo.parent())
+            .map(|path| path.join("shortcut_set_floodlights.py")),
+    );
+
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            "Floodlight script not found; set GRINDLEWALD_FLOODLIGHT_SCRIPT to its path".into()
+        })
+}
+
+fn floodlight_python_path() -> PathBuf {
+    if let Some(path) = env::var_os("GRINDLEWALD_FLOODLIGHT_PYTHON").map(PathBuf::from)
+        && path.is_file()
+    {
+        return path;
+    }
+    if let Some(path) = dirs::home_dir()
+        .map(|home| home.join("miniconda3/envs/govee/bin/python"))
+        .filter(|path| path.is_file())
+    {
+        return path;
+    }
+    PathBuf::from("python3")
+}
+
+#[tauri::command]
+async fn set_floodlights(on: bool) -> Result<String, String> {
+    let state = if on { "on" } else { "off" };
+    let output = tokio::process::Command::new(floodlight_python_path())
+        .arg(floodlight_script_path()?)
+        .arg(state)
+        .output()
+        .await
+        .map_err(|error| format!("Could not start the floodlight script: {error}"))?;
+
+    if output.status.success() {
+        Ok(format!("Floodlights {state}"))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        Err(if stderr.is_empty() {
+            format!("Floodlight script exited with {}", output.status)
+        } else {
+            format!("Floodlight script failed: {stderr}")
+        })
+    }
 }
 
 #[tauri::command]
@@ -169,6 +238,7 @@ pub fn run() {
             discover_lights,
             execute_control,
             test_schedule,
+            set_floodlights,
             hide_window,
             quit_app,
         ])

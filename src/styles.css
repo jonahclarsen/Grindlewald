@@ -48,6 +48,11 @@ h3 { font-size: 14px; }
 #connection-dot.busy { background: var(--gold); box-shadow: 0 0 10px var(--gold); }
 #connection-dot.error { background: #ff7575; box-shadow: 0 0 10px #ff7575; }
 
+.floodlight-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 13px; }
+.floodlight-title { display: flex; align-items: center; gap: 8px; }
+.floodlight-actions { display: grid; grid-template-columns: repeat(2, 64px); gap: 7px; }
+.floodlight-actions button:disabled { cursor: wait; opacity: .62; }
+
 .picker-card { padding: 14px; border-radius: 15px; border: 1px solid var(--border); }
 .custom-picker { margin-bottom: 10px; }
 .picker-card.color-card { background: linear-gradient(145deg, rgba(155, 73, 184, .25), rgba(62, 36, 71, .65)); }
