@@ -240,7 +240,7 @@ function renderPresets() {
     const colorMaximum = preset.mode === "color" ? 360 : 100;
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-preset-index="${index}">
-      <div class="card-title"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset">›</button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset">›</button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-preset-field="name" value="${escapeHtml(preset.name)}"></label>
         <label class="field">Mode<select data-preset-field="mode"><option value="color" ${preset.mode === "color" ? "selected" : ""}>Color</option><option value="white" ${preset.mode === "white" ? "selected" : ""}>White</option></select></label>
@@ -277,7 +277,7 @@ function renderDevices() {
     }
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
-      <div class="card-title"><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light">›</button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light">›</button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
         <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic (H6001)</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
@@ -331,6 +331,15 @@ function uniqueId() {
 document.addEventListener("click", async (event) => {
   const collapseEditor = event.target.closest("[data-collapse-editor]");
   if (collapseEditor) {
+    expandedEditorKey = null;
+    renderPresets();
+    renderDevices();
+    return;
+  }
+  const collapseEditorHeader = event.target.closest("[data-collapse-editor-header]");
+  const clickedHeaderControl = event.target.closest("button, input, select, textarea, a");
+  if (collapseEditorHeader && !clickedHeaderControl) {
+    event.preventDefault();
     expandedEditorKey = null;
     renderPresets();
     renderDevices();

@@ -111,6 +111,7 @@ button { cursor: pointer; }
 .enabled-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 7px rgba(112,216,173,.55); }
 .enabled-dot.off { background: #6e6879; box-shadow: none; }
 .expanded-editor { padding: 12px; }
+.collapsible-card-title { cursor: pointer; }
 .collapse-button { border: 0; background: none; color: var(--muted); font-size: 20px; transform: rotate(90deg); }
 .connection-setting { margin-top: 14px; grid-template-columns: 1fr auto; align-items: center; }
 .connection-setting small { display: block; margin-top: 3px; }
