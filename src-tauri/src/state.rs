@@ -15,7 +15,7 @@ use crate::{
     ble::{BleController, DiscoveredDevice},
     command::ControlCommand,
     privileged,
-    settings::{self, LightMode, Schedule, Settings},
+    settings::{self, FloodlightAction, LightMode, Schedule, Settings},
 };
 
 #[derive(Clone)]
@@ -329,6 +329,14 @@ impl SharedState {
             Ok::<_, String>(messages.join(", "))
         };
 
+        let floodlights = async move {
+            match schedule.floodlights {
+                FloodlightAction::Unchanged => Ok(None),
+                FloodlightAction::On => crate::run_floodlights(true).await.map(Some),
+                FloodlightAction::Off => crate::run_floodlights(false).await.map(Some),
+            }
+        };
+
         let shell_command = schedule.shell_command.trim().to_owned();
         let run_as_administrator = schedule.run_as_administrator;
         let privileged_approved_command = schedule.privileged_approved_command.clone();
@@ -357,12 +365,25 @@ impl SharedState {
             }
         };
 
-        let (lights_result, shell_result) = tokio::join!(lights, shell);
-        match (lights_result, shell_result) {
-            (Ok(lights), Ok(shell)) => Ok(format!("{lights}. {shell}.")),
-            (Err(lights), Ok(_)) => Err(lights),
-            (Ok(_), Err(shell)) => Err(shell),
-            (Err(lights), Err(shell)) => Err(format!("{lights}; {shell}")),
+        let (lights_result, floodlights_result, shell_result) =
+            tokio::join!(lights, floodlights, shell);
+        let mut messages = Vec::new();
+        let mut errors = Vec::new();
+        for result in [
+            lights_result.map(Some),
+            floodlights_result,
+            shell_result.map(Some),
+        ] {
+            match result {
+                Ok(Some(message)) => messages.push(message),
+                Ok(None) => {}
+                Err(error) => errors.push(error),
+            }
+        }
+        if errors.is_empty() {
+            Ok(format!("{}.", messages.join(". ")))
+        } else {
+            Err(errors.join("; "))
         }
     }
 

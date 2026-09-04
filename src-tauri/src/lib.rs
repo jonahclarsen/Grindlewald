@@ -167,8 +167,7 @@ fn floodlight_python_path() -> PathBuf {
     PathBuf::from("python3")
 }
 
-#[tauri::command]
-async fn set_floodlights(on: bool) -> Result<String, String> {
+async fn run_floodlights(on: bool) -> Result<String, String> {
     let state = if on { "on" } else { "off" };
     let output = tokio::process::Command::new(floodlight_python_path())
         .arg(floodlight_script_path()?)
@@ -187,6 +186,11 @@ async fn set_floodlights(on: bool) -> Result<String, String> {
             format!("Floodlight script failed: {stderr}")
         })
     }
+}
+
+#[tauri::command]
+async fn set_floodlights(on: bool) -> Result<String, String> {
+    run_floodlights(on).await
 }
 
 #[tauri::command]

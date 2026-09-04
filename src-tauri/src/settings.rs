@@ -35,6 +35,15 @@ pub struct Preset {
     pub brightness: f32,
 }
 
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FloodlightAction {
+    #[default]
+    Unchanged,
+    On,
+    Off,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Schedule {
@@ -47,6 +56,8 @@ pub struct Schedule {
     #[serde(default)]
     pub lights: Vec<String>,
     pub preset: String,
+    #[serde(default)]
+    pub floodlights: FloodlightAction,
     #[serde(default)]
     pub shell_command: String,
     #[serde(default)]
@@ -418,6 +429,7 @@ mod tests {
                 enabled: true,
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],
                 preset: "daytime".into(),
+                floodlights: FloodlightAction::Unchanged,
                 shell_command: String::new(),
                 run_as_administrator: false,
                 privileged_approved_command: String::new(),
@@ -431,5 +443,18 @@ mod tests {
         assert_eq!(settings.devices[0].name, "Original lamp");
         assert_eq!(settings.devices[0].identifier, "AABB-CCDD");
         assert_eq!(settings.schedules[0].lights, ["Original lamp"]);
+    }
+
+    #[test]
+    fn legacy_schedules_leave_floodlights_unchanged() {
+        let schedule: Schedule = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy automation",
+            "time": "20:00",
+            "preset": "daytime"
+        }))
+        .unwrap();
+
+        assert_eq!(schedule.floodlights, FloodlightAction::Unchanged);
     }
 }

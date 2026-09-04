@@ -20,7 +20,7 @@ const demoSettings = {
     { name: "crashtime", mode: "color", value: "#ff4500", brightness: 0 },
   ],
   schedules: [
-    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: true, privilegedApprovedCommand: "shortcuts run 'Wind Down'", privilegedApprovedAt: "2026-09-04T08:00:00-07:00" },
+    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", floodlights: "off", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: true, privilegedApprovedCommand: "shortcuts run 'Wind Down'", privilegedApprovedAt: "2026-09-04T08:00:00-07:00" },
   ],
 };
 
@@ -304,12 +304,13 @@ function renderSchedules() {
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field full">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
+        <label class="field full">Floodlights<select data-schedule-field="floodlights"><option value="unchanged" ${(schedule.floodlights || "unchanged") === "unchanged" ? "selected" : ""}>Leave unchanged</option><option value="on" ${schedule.floodlights === "on" ? "selected" : ""}>Turn on</option><option value="off" ${schedule.floodlights === "off" ? "selected" : ""}>Turn off</option></select></label>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
       </div>
       <div class="warning">${warning} Only approve commands you trust. Referenced script files can change without reapproval.</div>
-      <button class="secondary" data-test-schedule="${escapeHtml(schedule.id)}">Test light + script now</button>
+      <button class="secondary" data-test-schedule="${escapeHtml(schedule.id)}">Test automation now</button>
     </article>`;
   }).join("") : '<div class="empty">No automations yet. Add one with ＋.</div>';
 }
@@ -668,7 +669,7 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
