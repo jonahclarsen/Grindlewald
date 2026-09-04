@@ -115,6 +115,13 @@ button { cursor: pointer; }
 .compact-editor-card .swatch { width: 14px; height: 14px; margin: 0; }
 .enabled-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 7px rgba(112,216,173,.55); }
 .enabled-dot.off { background: #6e6879; box-shadow: none; }
+.service-summary { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.service-summary small { display: block; margin-top: 3px; }
+.privileged-service-card { gap: 8px; }
+.service-remove { justify-self: start; padding: 2px 0; color: #d78080; }
+.field.approval-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.approval-state { color: var(--green); font-size: 10px; }
+.approval-state.pending { color: var(--gold); }
 .expanded-editor { padding: 12px; }
 .collapsible-card-title { cursor: pointer; }
 .collapse-button { border: 0; background: none; color: var(--muted); font-size: 20px; transform: rotate(90deg); }
@@ -143,7 +150,7 @@ button { cursor: pointer; }
 .check-pill { padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.045); color: var(--muted); font-size: 10px; }
 .check-pill input { margin: 0 4px 0 0; accent-color: var(--purple); }
 .warning { color: #dbba7a; background: rgba(220, 171, 75, .08); border-radius: 8px; padding: 8px; font-size: 10px; line-height: 1.35; }
-.administrator-check { justify-self: start; }
+.administrator-check { grid-column: 1 / -1; justify-self: start; }
 .discovery-progress { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 18px; color: var(--muted); border: 1px dashed var(--border); border-radius: 13px; font-size: 11px; }
 .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.18); border-top-color: var(--gold); border-radius: 50%; animation: spin .75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -20,7 +20,7 @@ const demoSettings = {
     { name: "crashtime", mode: "color", value: "#ff4500", brightness: 0 },
   ],
   schedules: [
-    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: false },
+    { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: true, privilegedApprovedCommand: "shortcuts run 'Wind Down'", privilegedApprovedAt: "2026-09-04T08:00:00-07:00" },
   ],
 };
 
@@ -30,6 +30,9 @@ let pendingControl = null;
 let sendingControl = false;
 let activeEffect = null;
 let expandedEditorKey = null;
+let privilegedService = demoMode
+  ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
+  : { installed: false, healthy: false, current: false, message: "Not installed" };
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
@@ -180,6 +183,17 @@ async function call(command, args = {}) {
       { name: "Govee new lamp", identifier: "LOCAL-DEMO-ID" },
     ];
     if (command === "set_floodlights") return `Floodlights ${args.on ? "on" : "off"}`;
+    if (command === "privileged_service_status") return privilegedService;
+    if (command === "install_privileged_service") {
+      privilegedService = { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" };
+      return "Privileged automation service installed";
+    }
+    if (command === "uninstall_privileged_service") {
+      privilegedService = { installed: false, healthy: false, current: false, message: "Not installed" };
+      return "Privileged automation service removed";
+    }
+    if (command === "approve_privileged_job") return "Administrator command approved for unattended use";
+    if (command === "revoke_privileged_job") return "Administrator job approval revoked";
     return command === "test_schedule" ? "Updated 2 light(s). Shell command completed." : "Updated 2 light(s)";
   }
   return invoke(command, args);
@@ -261,7 +275,28 @@ function renderPresets() {
 
 function renderSchedules() {
   const presetOptions = settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
-  $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => `
+  $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => {
+    const approved = Boolean(schedule.privilegedApprovedCommand) && schedule.privilegedApprovedCommand === schedule.shellCommand.trim();
+    const hasStaleApproval = Boolean(schedule.privilegedApprovedCommand) && !approved;
+    const approveLabel = !privilegedService.installed
+      ? "Install service first"
+      : !privilegedService.healthy
+        ? "Repair service first"
+        : approved ? "Approve again" : "Approve root command";
+    const approvalControls = schedule.runAsAdministrator || schedule.privilegedApprovedCommand ? `
+      <div class="approval-row field full">
+        ${schedule.runAsAdministrator ? `<button class="${approved ? "secondary" : "primary"} compact" data-approve-privileged="${escapeHtml(schedule.id)}">${approveLabel}</button>` : ""}
+        ${schedule.privilegedApprovedCommand ? `<button class="text-button" data-revoke-privileged="${escapeHtml(schedule.id)}">Revoke</button>` : ""}
+        <span class="approval-state ${approved ? "" : "pending"}">${approved ? "Approved for unattended use" : hasStaleApproval ? "Command changed · approval required" : "Approval required"}</span>
+      </div>` : "";
+    const warning = schedule.runAsAdministrator
+      ? approved
+        ? "Runs unattended through the root-owned Grindlewald helper. Editing the command requires approval again."
+        : "This command will not run as root until you approve its exact contents with macOS."
+      : schedule.privilegedApprovedCommand
+        ? "A dormant administrator approval remains. Revoke it if you no longer need it."
+        : "Runs locally through <code>/bin/zsh -lc</code>.";
+    return `
     <article class="editor-card" data-schedule-index="${index}">
       <div class="card-title"><label class="inline"><input type="checkbox" data-schedule-field="enabled" ${schedule.enabled ? "checked" : ""}><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong></label><button class="remove-button" data-remove-schedule="${index}">Remove</button></div>
       <div class="field-grid">
@@ -270,11 +305,31 @@ function renderSchedules() {
         <label class="field full">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
-        <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run as administrator</label>
+        <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
+        ${approvalControls}
       </div>
-      <div class="warning">${schedule.runAsAdministrator ? "macOS will request administrator authorization when this runs." : "Runs locally through <code>/bin/zsh -lc</code>."} Only enter commands you trust.</div>
+      <div class="warning">${warning} Only approve commands you trust. Referenced script files can change without reapproval.</div>
       <button class="secondary" data-test-schedule="${escapeHtml(schedule.id)}">Test light + script now</button>
-    </article>`).join("") : '<div class="empty">No automations yet. Add one with ＋.</div>';
+    </article>`;
+  }).join("") : '<div class="empty">No automations yet. Add one with ＋.</div>';
+}
+
+function renderPrivilegedService() {
+  const title = privilegedService.installed
+    ? !privilegedService.healthy ? "Repair required" : privilegedService.current ? "Ready" : "Update required"
+    : "Not installed";
+  $("#privileged-service-title").textContent = title;
+  $("#privileged-service-message").textContent = privilegedService.message;
+  $("#privileged-service-dot").classList.toggle("off", !privilegedService.installed || !privilegedService.healthy || !privilegedService.current);
+  $("#privileged-service-install").textContent = privilegedService.installed
+    ? privilegedService.healthy ? "Update" : "Repair"
+    : "Install";
+  $("#privileged-service-remove").hidden = !privilegedService.installed;
+}
+
+async function refreshPrivilegedService() {
+  privilegedService = await call("privileged_service_status");
+  renderPrivilegedService();
 }
 
 function renderDevices() {
@@ -330,6 +385,7 @@ function renderAll() {
   renderSchedules();
   renderDevices();
   renderExperimentTargets();
+  renderPrivilegedService();
 }
 
 function uniqueId() {
@@ -398,7 +454,16 @@ document.addEventListener("click", async (event) => {
     await save(); renderAll();
   }
   const removeSchedule = event.target.closest("[data-remove-schedule]");
-  if (removeSchedule) { settings.schedules.splice(Number(removeSchedule.dataset.removeSchedule), 1); await save(); renderSchedules(); }
+  if (removeSchedule) {
+    const index = Number(removeSchedule.dataset.removeSchedule);
+    const schedule = settings.schedules[index];
+    if (schedule.privilegedApprovedCommand) {
+      setStatus("Revoking administrator approval…", "busy");
+      try { await call("revoke_privileged_job", { id: schedule.id }); }
+      catch (error) { setStatus(String(error), "error"); return; }
+    }
+    settings.schedules.splice(index, 1); await save(); renderSchedules();
+  }
   const removeDevice = event.target.closest("[data-remove-device]");
   if (removeDevice) {
     expandedEditorKey = null;
@@ -426,6 +491,42 @@ document.addEventListener("click", async (event) => {
     await save(); setStatus("Running test…", "busy");
     try { setStatus(await call("test_schedule", { id: test.dataset.testSchedule })); }
     catch (error) { setStatus(String(error), "error"); }
+  }
+
+  const approvePrivileged = event.target.closest("[data-approve-privileged]");
+  if (approvePrivileged) {
+    if (!privilegedService.installed || !privilegedService.healthy) {
+      showPage("settings-page");
+      setStatus(privilegedService.installed
+        ? "Repair the privileged automation service first"
+        : "Install the privileged automation service first", "error");
+      return;
+    }
+    await save();
+    setStatus("Waiting for administrator approval…", "busy");
+    try {
+      setStatus(await call("approve_privileged_job", { id: approvePrivileged.dataset.approvePrivileged }));
+      settings = demoMode ? settings : await call("get_settings");
+      if (demoMode) {
+        const schedule = settings.schedules.find((item) => item.id === approvePrivileged.dataset.approvePrivileged);
+        schedule.privilegedApprovedCommand = schedule.shellCommand.trim();
+        schedule.privilegedApprovedAt = new Date().toISOString();
+      }
+      renderSchedules();
+    } catch (error) { setStatus(String(error), "error"); }
+  }
+
+  const revokePrivileged = event.target.closest("[data-revoke-privileged]");
+  if (revokePrivileged) {
+    setStatus("Waiting for administrator approval…", "busy");
+    try {
+      setStatus(await call("revoke_privileged_job", { id: revokePrivileged.dataset.revokePrivileged }));
+      const schedule = settings.schedules.find((item) => item.id === revokePrivileged.dataset.revokePrivileged);
+      schedule.runAsAdministrator = false;
+      schedule.privilegedApprovedCommand = "";
+      schedule.privilegedApprovedAt = "";
+      renderSchedules();
+    } catch (error) { setStatus(String(error), "error"); }
   }
 });
 
@@ -567,7 +668,7 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "", runAsAdministrator: false });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
@@ -595,6 +696,26 @@ $("#connection-hold-seconds").addEventListener("change", async (event) => {
   event.target.value = settings.connectionHoldSeconds;
   await save();
 });
+$("#privileged-service-install").addEventListener("click", async () => {
+  setStatus("Waiting for administrator approval…", "busy");
+  try {
+    setStatus(await call("install_privileged_service"));
+    await refreshPrivilegedService();
+  } catch (error) { setStatus(String(error), "error"); }
+});
+$("#privileged-service-remove").addEventListener("click", async () => {
+  setStatus("Waiting for administrator approval…", "busy");
+  try {
+    setStatus(await call("uninstall_privileged_service"));
+    settings.schedules.forEach((schedule) => {
+      schedule.runAsAdministrator = false;
+      schedule.privilegedApprovedCommand = "";
+      schedule.privilegedApprovedAt = "";
+    });
+    await refreshPrivilegedService();
+    renderSchedules();
+  } catch (error) { setStatus(String(error), "error"); }
+});
 $("#close-button").addEventListener("click", () => call("hide_window"));
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 
@@ -614,6 +735,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");
+await refreshPrivilegedService();
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");
 if (requestedPage === "presets") showPage("settings-page");

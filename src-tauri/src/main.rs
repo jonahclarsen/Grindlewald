@@ -1,6 +1,10 @@
 use std::process::Command;
 
 fn main() {
+    if let Some(exit_code) = grindlewald_lib::privileged::maybe_run_helper() {
+        std::process::exit(exit_code);
+    }
+
     if std::env::var_os("GRINDLEWALD_DEV_SUPERVISOR").is_some() {
         let repository = std::env::var("GRINDLEWALD_REPO")
             .expect("GRINDLEWALD_REPO is required in development supervisor mode");

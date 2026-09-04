@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use crate::{
     ble::{BleController, DiscoveredDevice},
     command::ControlCommand,
+    privileged,
     settings::{self, LightMode, Schedule, Settings},
 };
 
@@ -257,6 +258,54 @@ impl SharedState {
         self.run_schedule(schedule).await
     }
 
+    pub fn approve_privileged_job(&self, id: &str) -> Result<String, String> {
+        let mut settings = self.load_settings()?;
+        let schedule_index = settings
+            .schedules
+            .iter()
+            .position(|schedule| schedule.id == id)
+            .ok_or_else(|| format!("schedule {id:?} was not found"))?;
+        let command = settings.schedules[schedule_index]
+            .shell_command
+            .trim()
+            .to_owned();
+        let config_directory = self
+            .settings_path
+            .parent()
+            .ok_or("settings path has no parent")?;
+        privileged::approve_job(config_directory, id, &command)?;
+        settings.schedules[schedule_index].run_as_administrator = true;
+        settings.schedules[schedule_index].privileged_approved_command = command;
+        settings.schedules[schedule_index].privileged_approved_at = Local::now().to_rfc3339();
+        self.save_settings(&settings)?;
+        Ok("Administrator command approved for unattended use".into())
+    }
+
+    pub fn revoke_privileged_job(&self, id: &str) -> Result<String, String> {
+        let mut settings = self.load_settings()?;
+        let schedule = settings
+            .schedules
+            .iter_mut()
+            .find(|schedule| schedule.id == id)
+            .ok_or_else(|| format!("schedule {id:?} was not found"))?;
+        let message = privileged::revoke_job(id)?;
+        schedule.run_as_administrator = false;
+        schedule.privileged_approved_command.clear();
+        schedule.privileged_approved_at.clear();
+        self.save_settings(&settings)?;
+        Ok(message)
+    }
+
+    pub fn clear_privileged_approvals(&self) -> Result<(), String> {
+        let mut settings = self.load_settings()?;
+        for schedule in &mut settings.schedules {
+            schedule.run_as_administrator = false;
+            schedule.privileged_approved_command.clear();
+            schedule.privileged_approved_at.clear();
+        }
+        self.save_settings(&settings)
+    }
+
     async fn run_schedule(&self, schedule: Schedule) -> Result<String, String> {
         let targets = if schedule.lights.is_empty() {
             vec![None]
@@ -282,34 +331,26 @@ impl SharedState {
 
         let shell_command = schedule.shell_command.trim().to_owned();
         let run_as_administrator = schedule.run_as_administrator;
+        let privileged_approved_command = schedule.privileged_approved_command.clone();
+        let schedule_id = schedule.id.clone();
         let shell = async move {
             if shell_command.is_empty() {
                 return Ok::<String, String>("No shell command".into());
             }
-            let (mut process, success_message) = if run_as_administrator {
-                let mut process = tokio::process::Command::new("/usr/bin/osascript");
-                process.args([
-                    "-e",
-                    "on run argv",
-                    "-e",
-                    "do shell script (\"/bin/zsh -lc \" & quoted form of (item 1 of argv)) with administrator privileges",
-                    "-e",
-                    "end run",
-                    "--",
-                    &shell_command,
-                ]);
-                (process, "Administrator command completed")
-            } else {
-                let mut process = tokio::process::Command::new("/bin/zsh");
-                process.args(["-lc", &shell_command]);
-                (process, "Shell command completed")
-            };
+            if run_as_administrator {
+                if privileged_approved_command != shell_command {
+                    return Err("administrator command changed and must be approved again".into());
+                }
+                return privileged::run_job(&schedule_id).await;
+            }
+            let mut process = tokio::process::Command::new("/bin/zsh");
+            process.args(["-lc", &shell_command]);
             let output = process
                 .output()
                 .await
                 .map_err(|error| format!("could not start shell command: {error}"))?;
             if output.status.success() {
-                Ok(success_message.into())
+                Ok("Shell command completed".into())
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
                 Err(format!("shell command failed: {stderr}"))

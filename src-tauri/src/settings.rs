@@ -51,6 +51,10 @@ pub struct Schedule {
     pub shell_command: String,
     #[serde(default)]
     pub run_as_administrator: bool,
+    #[serde(default)]
+    pub privileged_approved_command: String,
+    #[serde(default)]
+    pub privileged_approved_at: String,
 }
 
 fn enabled_by_default() -> bool {
@@ -237,6 +241,14 @@ impl Settings {
             if schedule.id.trim().is_empty() || schedule.name.trim().is_empty() {
                 return Err("every schedule needs an ID and name".into());
             }
+            if schedule.id.len() > 64
+                || !schedule
+                    .id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            {
+                return Err(format!("schedule {:?} has an invalid ID", schedule.name));
+            }
             let valid_time = schedule.time.len() == 5
                 && schedule.time.as_bytes()[2] == b':'
                 && schedule.time[..2].parse::<u8>().is_ok_and(|hour| hour < 24)
@@ -408,6 +420,8 @@ mod tests {
                 preset: "daytime".into(),
                 shell_command: String::new(),
                 run_as_administrator: false,
+                privileged_approved_command: String::new(),
+                privileged_approved_at: String::new(),
             }],
             ..Settings::default()
         };

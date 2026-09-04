@@ -106,6 +106,16 @@
           <label><input id="connection-hold-seconds" type="number" min="1" max="60" step="1" inputmode="numeric" aria-label="Connection hold duration in seconds"><span>seconds</span></label>
         </div>
 
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Security</span><h3>Privileged automations</h3></div></div>
+        <div class="editor-card privileged-service-card">
+          <div class="card-title">
+            <span class="service-summary"><span id="privileged-service-dot" class="enabled-dot off"></span><span><strong id="privileged-service-title">Not installed</strong><small id="privileged-service-message" class="muted">Required for unattended administrator commands</small></span></span>
+            <button id="privileged-service-install" class="primary compact">Install</button>
+          </div>
+          <p class="page-copy">One root-owned helper runs only commands you approve individually. Your password is handled by macOS and is never saved by Grindlewald.</p>
+          <button id="privileged-service-remove" class="text-button service-remove" hidden>Remove privileged service</button>
+        </div>
+
         <div class="section-heading settings-heading"><div><span class="eyebrow">Your palette</span><h3>Color presets</h3></div><button id="add-preset" class="round-button">＋</button></div>
         <p class="page-copy">Available in the controller, automations, and <code>grindlewaldctl</code>.</p>
         <div id="preset-editor" class="stack"></div>

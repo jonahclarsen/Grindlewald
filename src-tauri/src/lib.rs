@@ -1,6 +1,7 @@
 pub mod ble;
 pub mod command;
 pub mod ipc;
+pub mod privileged;
 pub mod protocol;
 pub mod settings;
 pub mod state;
@@ -71,6 +72,54 @@ async fn execute_control(
 #[tauri::command]
 async fn test_schedule(id: String, state: tauri::State<'_, SharedState>) -> Result<String, String> {
     state.run_schedule_by_id(&id).await
+}
+
+#[tauri::command]
+fn privileged_service_status() -> privileged::ServiceStatus {
+    privileged::service_status()
+}
+
+#[tauri::command]
+async fn install_privileged_service() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(privileged::install_service)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn approve_privileged_job(
+    id: String,
+    state: tauri::State<'_, SharedState>,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.approve_privileged_job(&id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn revoke_privileged_job(
+    id: String,
+    state: tauri::State<'_, SharedState>,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.revoke_privileged_job(&id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn uninstall_privileged_service(
+    state: tauri::State<'_, SharedState>,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let message = privileged::uninstall_service()?;
+        state.clear_privileged_approvals()?;
+        Ok(message)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn floodlight_script_path() -> Result<PathBuf, String> {
@@ -238,6 +287,11 @@ pub fn run() {
             discover_lights,
             execute_control,
             test_schedule,
+            privileged_service_status,
+            install_privileged_service,
+            approve_privileged_job,
+            revoke_privileged_job,
+            uninstall_privileged_service,
             set_floodlights,
             hide_window,
             quit_app,
