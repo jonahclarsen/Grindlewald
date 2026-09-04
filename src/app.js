@@ -276,6 +276,7 @@ function renderPresets() {
 function renderSchedules() {
   const presetOptions = settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
   $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => {
+    const floodlightAction = schedule.floodlights || "unchanged";
     const approved = Boolean(schedule.privilegedApprovedCommand) && schedule.privilegedApprovedCommand === schedule.shellCommand.trim();
     const hasStaleApproval = Boolean(schedule.privilegedApprovedCommand) && !approved;
     const approveLabel = !privilegedService.installed
@@ -304,7 +305,7 @@ function renderSchedules() {
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field full">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
-        <label class="field full">Floodlights<select data-schedule-field="floodlights"><option value="unchanged" ${(schedule.floodlights || "unchanged") === "unchanged" ? "selected" : ""}>Leave unchanged</option><option value="on" ${schedule.floodlights === "on" ? "selected" : ""}>Turn on</option><option value="off" ${schedule.floodlights === "off" ? "selected" : ""}>Turn off</option></select></label>
+        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="unchanged" data-schedule-field="floodlights" ${floodlightAction === "unchanged" ? "checked" : ""}>Do nothing</label></span></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
