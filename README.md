@@ -4,8 +4,6 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 
 <p align="center">
   <img src="docs/screenshots/controller.png" width="31%" alt="Grindlewald color controller">
-  <img src="docs/screenshots/automations.png" width="31%" alt="Grindlewald automation editor">
-  <img src="docs/screenshots/settings.png" width="31%" alt="Grindlewald light settings">
 </p>
 
 ## Highlights
