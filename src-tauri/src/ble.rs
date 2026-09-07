@@ -192,45 +192,89 @@ impl BleController {
             .map_err(|error| error.to_string())?;
         let _ = adapter.stop_scan().await;
 
-        let mut jobs = Vec::new();
+        let mut targets = Vec::new();
         for device in missing {
             let peripheral = find_peripheral(&peripherals, &device)
                 .await
                 .ok_or_else(|| format!("could not find {} over Bluetooth", device.name))?;
-            jobs.push(async move {
-                if !peripheral
-                    .is_connected()
-                    .await
-                    .map_err(|error| error.to_string())?
-                {
-                    peripheral
-                        .connect()
-                        .await
-                        .map_err(|error| format!("{}: {error}", device.name))?;
-                }
+            targets.push((device, peripheral));
+        }
+        // Track attempts before awaiting connect so cancellation can release every link.
+        for (device, peripheral) in &targets {
+            self.connections
+                .insert(normalize(&device.identifier), peripheral.clone());
+        }
+        let jobs = targets.into_iter().map(|(device, peripheral)| async move {
+            if !peripheral
+                .is_connected()
+                .await
+                .map_err(|error| error.to_string())?
+            {
                 peripheral
-                    .discover_services()
+                    .connect()
                     .await
                     .map_err(|error| format!("{}: {error}", device.name))?;
-                Ok::<_, String>((normalize(&device.identifier), peripheral))
-            });
-        }
+            }
+            peripheral
+                .discover_services()
+                .await
+                .map_err(|error| format!("{}: {error}", device.name))?;
+            Ok::<_, String>(())
+        });
 
-        for result in join_all(jobs).await {
-            let (identifier, peripheral) = result?;
-            self.connections.insert(identifier, peripheral);
+        let errors: Vec<_> = join_all(jobs)
+            .await
+            .into_iter()
+            .filter_map(Result::err)
+            .collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
         }
-        Ok(())
     }
 
-    pub async fn disconnect_all(&mut self) {
-        let connections = std::mem::take(&mut self.connections);
-        join_all(connections.into_values().map(|peripheral| async move {
-            if peripheral.is_connected().await.unwrap_or(false) {
-                let _ = peripheral.disconnect().await;
-            }
-        }))
+    pub async fn connected_count(&self) -> Result<usize, String> {
+        let results = join_all(
+            self.connections
+                .values()
+                .map(|peripheral| peripheral.is_connected()),
+        )
         .await;
+        let mut count = 0;
+        for result in results {
+            if result.map_err(|_| "Could not read Bluetooth connection status")? {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    pub async fn disconnect_all(&mut self) -> Result<(), String> {
+        if let Some(adapter) = &self.adapter {
+            let _ = adapter.stop_scan().await;
+        }
+        let results = join_all(self.connections.iter().map(
+            |(identifier, peripheral)| async move {
+                // Also cancel connections that are still being established.
+                let result =
+                    tokio::time::timeout(Duration::from_secs(3), peripheral.disconnect()).await;
+                let released = matches!(result, Ok(Ok(())))
+                    || matches!(peripheral.is_connected().await, Ok(false));
+                (identifier.clone(), released)
+            },
+        ))
+        .await;
+        for (identifier, released) in results {
+            if released {
+                self.connections.remove(&identifier);
+            }
+        }
+        if self.connections.is_empty() {
+            Ok(())
+        } else {
+            Err("Could not disconnect every light. Try Disconnect again.".into())
+        }
     }
 
     pub async fn keep_alive(&mut self) {

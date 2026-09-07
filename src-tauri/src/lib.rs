@@ -70,6 +70,18 @@ async fn execute_control(
 }
 
 #[tauri::command]
+async fn connection_status(
+    state: tauri::State<'_, SharedState>,
+) -> Result<state::ConnectionStatus, String> {
+    state.connection_status().await
+}
+
+#[tauri::command]
+async fn disconnect_lights(state: tauri::State<'_, SharedState>) -> Result<String, String> {
+    state.disconnect().await
+}
+
+#[tauri::command]
 async fn test_schedule(id: String, state: tauri::State<'_, SharedState>) -> Result<String, String> {
     state.run_schedule_by_id(&id).await
 }
@@ -290,6 +302,8 @@ pub fn run() {
             save_settings,
             discover_lights,
             execute_control,
+            connection_status,
+            disconnect_lights,
             test_schedule,
             privileged_service_status,
             install_privileged_service,

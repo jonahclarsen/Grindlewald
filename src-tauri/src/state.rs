@@ -9,7 +9,7 @@ use std::{
 };
 
 use chrono::Local;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 
 use crate::{
     ble::{BleController, DiscoveredDevice},
@@ -18,6 +18,13 @@ use crate::{
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
 };
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionStatus {
+    connected_count: Option<usize>,
+    effect_active: bool,
+}
+
 #[derive(Clone)]
 pub struct SharedState {
     controller: Arc<Mutex<BleController>>,
@@ -25,6 +32,8 @@ pub struct SharedState {
     activity_generation: Arc<AtomicU64>,
     party_generation: Arc<AtomicU64>,
     party_active: Arc<AtomicBool>,
+    disconnect_signal: watch::Sender<()>,
+    disconnecting: Arc<AtomicBool>,
 }
 
 impl SharedState {
@@ -35,6 +44,8 @@ impl SharedState {
             activity_generation: Arc::new(AtomicU64::new(0)),
             party_generation: Arc::new(AtomicU64::new(0)),
             party_active: Arc::new(AtomicBool::new(false)),
+            disconnect_signal: watch::channel(()).0,
+            disconnecting: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -51,10 +62,49 @@ impl SharedState {
     }
 
     pub async fn discover(&self) -> Result<Vec<DiscoveredDevice>, String> {
-        self.controller.lock().await.discover().await
+        let cancelled = self.disconnect_signal.subscribe();
+        if self.disconnecting.load(Ordering::SeqCst) {
+            return Err("Disconnect in progress".into());
+        }
+        until_disconnect(cancelled, async {
+            self.controller.lock().await.discover().await
+        })
+        .await
+    }
+
+    pub async fn connection_status(&self) -> Result<ConnectionStatus, String> {
+        let connected_count = match self.controller.try_lock() {
+            Ok(controller) => Some(controller.connected_count().await?),
+            Err(_) => None,
+        };
+        Ok(ConnectionStatus {
+            connected_count,
+            effect_active: self.party_active.load(Ordering::SeqCst),
+        })
+    }
+
+    pub async fn disconnect(&self) -> Result<String, String> {
+        if self.disconnecting.swap(true, Ordering::SeqCst) {
+            return Err("Disconnect already in progress".into());
+        }
+        self.disconnect_signal.send_replace(());
+        self.party_active.store(false, Ordering::SeqCst);
+        self.party_generation.fetch_add(1, Ordering::SeqCst);
+        self.activity_generation.fetch_add(1, Ordering::SeqCst);
+        let result = self.controller.lock().await.disconnect_all().await;
+        self.disconnecting.store(false, Ordering::SeqCst);
+        result.map(|_| "Disconnected from lights".into())
     }
 
     pub async fn execute(&self, command: ControlCommand) -> Result<String, String> {
+        let cancelled = self.disconnect_signal.subscribe();
+        if self.disconnecting.load(Ordering::SeqCst) {
+            return Err("Disconnect in progress".into());
+        }
+        until_disconnect(cancelled, self.execute_inner(command)).await
+    }
+
+    async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
         if matches!(&command, ControlCommand::Experiment { device: None, .. }) {
             return Err("experimental commands must target one named light".into());
         }
@@ -79,6 +129,7 @@ impl SharedState {
         }
         self.party_active.store(false, Ordering::SeqCst);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
+        self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
         let command = resolve_preset(&settings, command)?;
         let result = self
@@ -119,10 +170,12 @@ impl SharedState {
             .await
         {
             self.party_active.store(false, Ordering::SeqCst);
+            self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
 
         let state = self.clone();
+        let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
             const COLORS: [&str; 12] = [
                 "#ff3040", "#ff7a21", "#ffd52b", "#7cff31", "#24e6a8", "#23d7ff", "#2670ff",
@@ -139,16 +192,19 @@ impl SharedState {
                     enter: false,
                     device: device.clone(),
                 };
-                if state
-                    .controller
-                    .lock()
-                    .await
-                    .apply(&settings, &command)
-                    .await
-                    .is_err()
-                {
+                let mut controller = state.controller.lock().await;
+                if state.party_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let result = tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => break,
+                    result = controller.apply(&settings, &command) => result,
+                };
+                if result.is_err() {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
+                    state.arm_idle_disconnect(settings.connection_hold_seconds);
                     break;
                 }
                 color_index = (color_index + 1) % COLORS.len();
@@ -196,10 +252,12 @@ impl SharedState {
             .await
         {
             self.party_active.store(false, Ordering::SeqCst);
+            self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
 
         let state = self.clone();
+        let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs_f32(pace_seconds)).await;
@@ -211,16 +269,19 @@ impl SharedState {
                     value: color_at_hue(hue),
                     device: device.clone(),
                 };
-                if state
-                    .controller
-                    .lock()
-                    .await
-                    .apply(&settings, &command)
-                    .await
-                    .is_err()
-                {
+                let mut controller = state.controller.lock().await;
+                if state.party_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let result = tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => break,
+                    result = controller.apply(&settings, &command) => result,
+                };
+                if result.is_err() {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
+                    state.arm_idle_disconnect(settings.connection_hold_seconds);
                     break;
                 }
             }
@@ -231,6 +292,7 @@ impl SharedState {
     async fn stop_effect(&self) -> Result<String, String> {
         self.party_active.store(false, Ordering::SeqCst);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
+        self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
         let command = ControlCommand::Color {
             value: settings.color.clone(),
@@ -389,20 +451,26 @@ impl SharedState {
 
     fn arm_idle_disconnect(&self, hold_seconds: u64) {
         let generation = self.activity_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut cancelled = self.disconnect_signal.subscribe();
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(hold_seconds);
             loop {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                 tokio::time::sleep(remaining.min(Duration::from_secs(2))).await;
+                let mut controller = state.controller.lock().await;
                 if state.activity_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    state.controller.lock().await.disconnect_all().await;
+                    let _ = controller.disconnect_all().await;
                     break;
                 }
-                state.controller.lock().await.keep_alive().await;
+                tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => break,
+                    _ = controller.keep_alive() => {}
+                }
             }
         });
     }
@@ -437,6 +505,17 @@ impl SharedState {
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
+    }
+}
+
+async fn until_disconnect<T>(
+    mut cancelled: watch::Receiver<()>,
+    operation: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::select! {
+        biased;
+        _ = cancelled.changed() => Err("Light command cancelled by disconnect".into()),
+        result = operation => result,
     }
 }
 
@@ -484,7 +563,68 @@ fn color_at_hue(hue: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{color_at_hue, random_hue};
+    use super::{SharedState, color_at_hue, random_hue, until_disconnect};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use tokio::sync::{Mutex, oneshot, watch};
+
+    #[tokio::test]
+    async fn disconnect_cancels_an_in_flight_operation_and_releases_its_lock() {
+        let (signal, cancelled) = watch::channel(());
+        let lock = Arc::new(Mutex::new(()));
+        let operation_lock = lock.clone();
+        let (started, ready) = oneshot::channel();
+        let task = tokio::spawn(until_disconnect(cancelled, async move {
+            let _guard = operation_lock.lock().await;
+            started.send(()).unwrap();
+            std::future::pending::<Result<(), String>>().await
+        }));
+        ready.await.unwrap();
+        assert!(lock.try_lock().is_err());
+        signal.send_replace(());
+        assert!(task.await.unwrap().unwrap_err().contains("cancelled"));
+        assert!(lock.try_lock().is_ok());
+        // A later, explicitly requested command can connect again.
+        assert_eq!(
+            until_disconnect(signal.subscribe(), async { Ok(42) }).await,
+            Ok(42)
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnect_wins_over_a_queued_command() {
+        let (signal, cancelled) = watch::channel(());
+        let ran = AtomicBool::new(false);
+        signal.send_replace(());
+        let result = until_disconnect(cancelled, async {
+            ran.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn disconnect_clears_effects_and_invalidates_hold_timers_without_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        state.party_active.store(true, Ordering::SeqCst);
+        let mut cancelled = state.disconnect_signal.subscribe();
+        assert!(state.disconnect().await.is_ok());
+        cancelled.changed().await.unwrap();
+        assert!(!state.party_active.load(Ordering::SeqCst));
+        assert_eq!(state.party_generation.load(Ordering::SeqCst), 1);
+        assert_eq!(state.activity_generation.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state.connection_status().await.unwrap().connected_count,
+            Some(0)
+        );
+        assert!(!state.disconnecting.load(Ordering::SeqCst));
+        assert!(!state.settings_path().exists());
+    }
 
     #[test]
     fn breathing_colors_move_continuously_around_the_hue_wheel() {

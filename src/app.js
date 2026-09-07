@@ -29,6 +29,13 @@ let discovered = [];
 let pendingControl = null;
 let sendingControl = false;
 let activeEffect = null;
+let connectionStatus = null;
+let disconnecting = false;
+let controlGeneration = 0;
+let controlsInFlight = 0;
+let refreshingConnection = false;
+let demoConnectedUntil = 0;
+let demoEffectActive = false;
 let expandedEditorKey = null;
 let privilegedService = demoMode
   ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
@@ -155,7 +162,7 @@ function makeDraggable(track, update) {
 
 function setStatus(message, kind = "ready") {
   $("#status").textContent = message;
-  $("#connection-dot").className = kind === "ready" ? "" : kind;
+  $("#status-dot").className = kind === "ready" ? "" : kind;
 }
 
 function setDiscoveryBusy(isBusy) {
@@ -175,8 +182,89 @@ function setFloodlightsBusy(isBusy) {
   });
 }
 
+function renderConnection() {
+  const button = $("#connection-button");
+  const connected = (connectionStatus?.connectedCount ?? 0) > 0;
+  const busy = controlsInFlight > 0 || (connectionStatus && (
+    connectionStatus.connectedCount === null || (connectionStatus.effectActive && !connected)
+  ));
+  button.classList.toggle("connected", connected && !disconnecting);
+  button.classList.toggle("busy", Boolean(disconnecting || busy));
+  button.disabled = disconnecting || (connectionStatus !== null && !connected && !busy);
+  button.setAttribute("aria-busy", String(disconnecting));
+  $("#connection-label").textContent = disconnecting ? "Disconnecting…"
+    : busy ? "Connecting / updating · Disconnect"
+    : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""} · Disconnect`
+    : connectionStatus ? "Disconnected" : "Status unavailable · Disconnect";
+  button.title = connected
+    ? "Keeping the Bluetooth connection open. Click to disconnect and stop effects."
+    : busy ? "Click to cancel light changes and close the Bluetooth connection."
+    : "Light controls reconnect automatically when used.";
+}
+
+async function refreshConnection() {
+  if (refreshingConnection || disconnecting) return;
+  refreshingConnection = true;
+  const generation = controlGeneration;
+  try {
+    const status = await call("connection_status");
+    if (generation === controlGeneration) {
+      connectionStatus = status;
+      if (!status.effectActive && controlsInFlight === 0) setEffectActive(null);
+    }
+  } catch {
+    if (generation === controlGeneration) connectionStatus = null;
+  } finally {
+    refreshingConnection = false;
+    renderConnection();
+  }
+}
+
+async function disconnectLights() {
+  if (disconnecting) return;
+  disconnecting = true;
+  controlGeneration += 1;
+  pendingControl = null;
+  setEffectActive(null);
+  renderConnection();
+  try {
+    setStatus(await call("disconnect_lights"));
+  } catch (error) {
+    setStatus(String(error), "error");
+  } finally {
+    disconnecting = false;
+    await refreshConnection();
+  }
+}
+
 async function call(command, args = {}) {
+  if (command !== "execute_control") return callBackend(command, args);
+  if (disconnecting) throw new Error("Disconnect in progress");
+  controlsInFlight += 1;
+  renderConnection();
+  try {
+    return await callBackend(command, args);
+  } finally {
+    controlsInFlight -= 1;
+    await refreshConnection();
+  }
+}
+
+async function callBackend(command, args = {}) {
   if (demoMode) {
+    if (command === "connection_status") return {
+      connectedCount: demoEffectActive || Date.now() < demoConnectedUntil ? 2 : 0,
+      effectActive: demoEffectActive,
+    };
+    if (command === "disconnect_lights") {
+      demoEffectActive = false;
+      demoConnectedUntil = 0;
+      return "Disconnected from lights";
+    }
+    if (command === "execute_control") {
+      demoEffectActive = ["party", "breathe"].includes(args.command.command);
+      demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
+    }
     if (command === "get_settings") return structuredClone(demoSettings);
     if (command === "discover_lights") return [
       { name: "Govee H6005", identifier: "local-ble-id-1" },
@@ -209,19 +297,21 @@ async function save() {
 }
 
 async function queueControl(command) {
+  if (disconnecting) return;
   setEffectActive(null);
   pendingControl = command;
   if (sendingControl) return;
   sendingControl = true;
   setStatus("Connecting…", "busy");
   while (pendingControl) {
+    const generation = controlGeneration;
     const latest = pendingControl;
     pendingControl = null;
     try {
       const message = await call("execute_control", { command: latest });
-      setStatus(message);
+      if (generation === controlGeneration) setStatus(message);
     } catch (error) {
-      setStatus(String(error), "error");
+      if (generation === controlGeneration) setStatus(String(error), "error");
     }
   }
   sendingControl = false;
@@ -596,11 +686,14 @@ $("#brightness").addEventListener("input", (event) => {
 $("#brightness").addEventListener("change", save);
 
 async function toggleEffect(effect) {
+  if (disconnecting) return;
+  const generation = controlGeneration;
   const starting = activeEffect !== effect;
   setStatus(starting ? `Starting ${effect}…` : `Stopping ${effect}…`, "busy");
   try {
     if (starting && activeEffect) {
       await call("execute_control", { command: { command: "stop_effect" } });
+      if (generation !== controlGeneration) return;
       setEffectActive(null);
     }
     const message = await call("execute_control", {
@@ -615,9 +708,11 @@ async function toggleEffect(effect) {
             }
         : { command: "stop_effect" },
     });
+    if (generation !== controlGeneration) return;
     setEffectActive(starting ? effect : null);
     setStatus(message);
   } catch (error) {
+    if (generation !== controlGeneration) return;
     setEffectActive(null);
     setStatus(String(error), "error");
   }
@@ -632,9 +727,9 @@ $("#breathing-pace").addEventListener("input", (event) => {
 $("#breathing-pace").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
-    await call("execute_control", { command: { command: "stop_effect" } });
-    setEffectActive(null);
+    const generation = controlGeneration;
     await toggleEffect("breathe");
+    if (generation === controlGeneration) await toggleEffect("breathe");
   }
 });
 $("#breathing-hue-step").addEventListener("input", (event) => {
@@ -644,9 +739,9 @@ $("#breathing-hue-step").addEventListener("input", (event) => {
 $("#breathing-hue-step").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
-    await call("execute_control", { command: { command: "stop_effect" } });
-    setEffectActive(null);
+    const generation = controlGeneration;
     await toggleEffect("breathe");
+    if (generation === controlGeneration) await toggleEffect("breathe");
   }
 });
 
@@ -718,6 +813,11 @@ $("#privileged-service-remove").addEventListener("click", async () => {
     renderSchedules();
   } catch (error) { setStatus(String(error), "error"); }
 });
+$("#connection-button").addEventListener("click", disconnectLights);
+window.addEventListener("focus", refreshConnection);
+setInterval(refreshConnection, 500);
+refreshConnection();
+
 $("#close-button").addEventListener("click", () => call("hide_window"));
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 

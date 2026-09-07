@@ -15,6 +15,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - A custom click-and-drag hue control for RGB mode and warm-to-cool slider for dedicated-white mode
 - Dragging either control switches light mode immediately
 - Configurable BLE connection hold time, making follow-up color changes fast
+- Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
 - Breathing mode with adjustable 0.1–2 second timing and 0.1–120° hue steps, defaulting to 0.75 seconds and 2°
@@ -132,6 +133,8 @@ The two profiles deliberately encode white differently:
 - **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
 
 The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: each session starts at a random hue, advances by the selected 0.1–120° hue step at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 2° every 0.75 seconds. A smaller hue step makes adjacent updates more alike and takes longer to complete a full color-wheel cycle. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
+
+The connection button above every page shows the current Bluetooth link status. Click **Connected · Disconnect** (or disconnect while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The button returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run.
 
 While the configured connection window is active, Grindlewald sends the captured `AA 01 … AB` no-op every two seconds. This keeps H6005 links alive beyond their roughly 15-second idle timeout without changing light state.
 

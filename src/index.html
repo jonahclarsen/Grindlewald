@@ -15,8 +15,12 @@
         <button id="close-button" class="icon-button" aria-label="Hide window">×</button>
       </header>
 
+      <button id="connection-button" class="connection-button" disabled aria-live="polite" title="Checking the Bluetooth connection">
+        <span id="connection-dot" aria-hidden="true"></span><span id="connection-label">Checking connection…</span>
+      </button>
+
       <section id="controller-page" class="page active">
-        <div class="controller-status eyebrow"><span id="connection-dot"></span><span id="status">Ready</span></div>
+        <div class="controller-status eyebrow"><span id="status-dot"></span><span id="status">Ready</span></div>
 
         <div class="floodlight-card">
           <span class="floodlight-title"><span class="mode-icon" aria-hidden="true">☀</span><strong>Floodlights</strong></span>
