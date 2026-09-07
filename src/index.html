@@ -15,9 +15,10 @@
         <button id="close-button" class="icon-button" aria-label="Hide window">×</button>
       </header>
 
-      <button id="connection-button" class="connection-button" disabled aria-live="polite" title="Checking the Bluetooth connection">
-        <span id="connection-dot" aria-hidden="true"></span><span id="connection-label">Checking connection…</span>
-      </button>
+      <div id="connection-control" class="connection-control">
+        <span class="connection-state" role="status"><span id="connection-dot" aria-hidden="true"></span><span id="connection-label">Checking connection…</span></span>
+        <button id="connection-button" class="connection-button" disabled title="Checking the Bluetooth connection">Disconnect</button>
+      </div>
 
       <section id="controller-page" class="page active">
         <div class="controller-status eyebrow"><span id="status-dot"></span><span id="status">Ready</span></div>

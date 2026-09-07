@@ -188,14 +188,15 @@ function renderConnection() {
   const busy = controlsInFlight > 0 || (connectionStatus && (
     connectionStatus.connectedCount === null || (connectionStatus.effectActive && !connected)
   ));
-  button.classList.toggle("connected", connected && !disconnecting);
-  button.classList.toggle("busy", Boolean(disconnecting || busy));
+  $("#connection-control").classList.toggle("connected", connected && !disconnecting);
+  $("#connection-control").classList.toggle("busy", Boolean(disconnecting || busy));
   button.disabled = disconnecting || (connectionStatus !== null && !connected && !busy);
   button.setAttribute("aria-busy", String(disconnecting));
   $("#connection-label").textContent = disconnecting ? "Disconnecting…"
-    : busy ? "Connecting / updating · Disconnect"
-    : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""} · Disconnect`
-    : connectionStatus ? "Disconnected" : "Status unavailable · Disconnect";
+    : busy ? "Connecting / updating"
+    : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""}`
+    : connectionStatus ? "Disconnected" : "Status unavailable";
+  button.textContent = disconnecting ? "Closing…" : "Disconnect";
   button.title = connected
     ? "Keeping the Bluetooth connection open. Click to disconnect and stop effects."
     : busy ? "Click to cancel light changes and close the Bluetooth connection."
