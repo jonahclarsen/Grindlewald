@@ -5,14 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Grindlewald</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="haligonian.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
     <main class="app-shell">
       <header>
         <div class="brand-mark" aria-hidden="true">G</div>
-        <h1>Grindlewald</h1>
-        <button id="close-button" class="icon-button" aria-label="Hide window">×</button>
+        <div class="brand-copy"><h1>GRINDLEWALD</h1><p>LED lighting control</p></div>
+        <button id="close-button" class="icon-button" aria-label="Hide window"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </header>
 
       <div id="connection-control" class="connection-control">
@@ -21,10 +22,15 @@
       </div>
 
       <section id="controller-page" class="page active">
+        <aside id="service-notice" class="service-notice" role="alert" hidden>
+          <div><strong id="service-notice-title">Update required</strong><p id="service-notice-message"></p></div>
+          <button id="service-notice-action" class="primary compact">Update now</button>
+        </aside>
+
         <div class="controller-status eyebrow"><span id="status-dot"></span><span id="status">Ready</span></div>
 
         <div class="floodlight-card">
-          <span class="floodlight-title"><span class="mode-icon" aria-hidden="true">☀</span><strong>Floodlights</strong></span>
+          <span class="floodlight-title"><svg class="mode-icon ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><strong>Floodlights</strong></span>
           <div class="floodlight-actions" role="group" aria-label="Floodlights">
             <button class="secondary compact" data-floodlights="false">Off</button>
             <button class="primary compact" data-floodlights="true">On</button>
@@ -32,14 +38,14 @@
         </div>
 
         <div class="picker-card color-card custom-picker">
-          <div class="picker-title"><span class="mode-icon">✦</span><span><strong>Color</strong><small>Drag to choose a hue</small></span><span id="color-swatch" class="large-swatch"></span></div>
+          <div class="picker-title"><svg class="mode-icon ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z"/></svg><span><strong>Color</strong><small>Drag to choose a hue</small></span><span id="color-swatch" class="large-swatch"></span></div>
           <div id="hue-track" class="picker-track hue-track" role="slider" aria-label="Color hue" aria-valuemin="0" aria-valuemax="360" tabindex="0">
             <span id="hue-knob" class="picker-knob"></span>
           </div>
         </div>
 
         <div class="picker-card white-card custom-picker">
-          <div class="picker-title"><span class="mode-icon">☼</span><span><strong>White</strong><small>Dedicated white LEDs</small></span><span id="white-swatch" class="large-swatch"></span></div>
+          <div class="picker-title"><svg class="mode-icon ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><span><strong>White</strong><small>Dedicated white LEDs</small></span><span id="white-swatch" class="large-swatch"></span></div>
           <div id="white-track" class="picker-track white-track" role="slider" aria-label="White warmth" aria-valuemin="0" aria-valuemax="100" tabindex="0">
             <span id="white-knob" class="picker-knob"></span>
           </div>
@@ -65,7 +71,7 @@
         <div id="quick-presets" class="preset-chips"></div>
 
         <details class="experimental-card">
-          <summary><span><strong>Experimental modes</strong><small>Try possible scene and music packets</small></span><span class="disclosure">›</span></summary>
+          <summary><span><strong>Experimental modes</strong><small>Try possible scene and music packets</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
           <div class="experimental-body">
             <label class="field full">Candidate<select id="experimental-candidate">
               <option value="04 00">H6001 · Sunrise</option>
@@ -99,7 +105,7 @@
       </section>
 
       <section id="automations-page" class="page">
-        <div class="page-title"><div><span class="eyebrow">Local time</span><h2>Automations</h2></div><button id="add-schedule" class="round-button">＋</button></div>
+        <div class="page-title"><div><span class="eyebrow">Local time</span><h2>Automations</h2></div><button id="add-schedule" class="round-button" aria-label="Add automation"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
         <p class="page-copy">Apply a preset, control the floodlights, and optionally run a shell command at the same time.</p>
         <div id="schedule-editor" class="stack"></div>
       </section>
@@ -121,7 +127,7 @@
           <button id="privileged-service-remove" class="text-button service-remove" hidden>Remove privileged service</button>
         </div>
 
-        <div class="section-heading settings-heading"><div><span class="eyebrow">Your palette</span><h3>Color presets</h3></div><button id="add-preset" class="round-button">＋</button></div>
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Your palette</span><h3>Color presets</h3></div><button id="add-preset" class="round-button" aria-label="Add preset"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
         <p class="page-copy">Available in the controller, automations, and <code>grindlewaldctl</code>.</p>
         <div id="preset-editor" class="stack"></div>
 
@@ -134,9 +140,9 @@
       </section>
 
       <nav aria-label="Main navigation">
-        <button class="nav-item active" data-page="controller-page" title="Control (⌘1)"><span>◉</span>Control<kbd>⌘1</kbd></button>
-        <button class="nav-item" data-page="automations-page" title="Automations (⌘2)"><span>◷</span>Automations<kbd>⌘2</kbd></button>
-        <button class="nav-item" data-page="settings-page" title="Settings (⌘3)"><span>⚙</span>Settings<kbd>⌘3</kbd></button>
+        <button class="nav-item active" data-page="controller-page" title="Control (⌘1)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><path d="M2 8h6m1 8h6m1-10h6"/></svg>Control<kbd>⌘1</kbd></button>
+        <button class="nav-item" data-page="automations-page" title="Automations (⌘2)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>Automations<kbd>⌘2</kbd></button>
+        <button class="nav-item" data-page="settings-page" title="Settings (⌘3)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 3-1 3-3 1v4l-2 1 2 1v4l3 1 1 3h6l1-3 3-1v-4l2-1-2-1V7l-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg>Settings<kbd>⌘3</kbd></button>
       </nav>
     </main>
   </body>

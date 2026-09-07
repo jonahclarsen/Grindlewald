@@ -344,7 +344,7 @@ function renderPresets() {
   $("#preset-editor").innerHTML = settings.presets.length ? settings.presets.map((preset, index) => {
     const editorKey = `preset:${index}`;
     if (expandedEditorKey !== editorKey) {
-      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="swatch" style="background:${escapeHtml(preset.value)}"></span><span class="summary-copy"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><small>${preset.mode === "color" ? "Color" : "White"} · ${Math.round(preset.brightness * 100)}%</small></span><span class="disclosure">›</span></button>`;
+      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="swatch" style="background:${escapeHtml(preset.value)}"></span><span class="summary-copy"><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><small>${preset.mode === "color" ? "Color" : "White"} · ${Math.round(preset.brightness * 100)}%</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     const colorPosition = preset.mode === "color"
       ? Math.round(hueFromHex(preset.value))
@@ -353,7 +353,7 @@ function renderPresets() {
     const colorMaximum = preset.mode === "color" ? 360 : 100;
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-preset-index="${index}">
-      <div class="card-title collapsible-card-title" data-collapse-editor-header><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset">›</button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-preset-field="name" value="${escapeHtml(preset.name)}"></label>
         <label class="field">Mode<select data-preset-field="mode"><option value="color" ${preset.mode === "color" ? "selected" : ""}>Color</option><option value="white" ${preset.mode === "white" ? "selected" : ""}>White</option></select></label>
@@ -418,6 +418,10 @@ function renderPrivilegedService() {
     ? privilegedService.healthy ? "Update" : "Repair"
     : "Install";
   $("#privileged-service-remove").hidden = !privilegedService.installed;
+  $("#service-notice").hidden = !privilegedService.installed || (privilegedService.healthy && privilegedService.current);
+  $("#service-notice-title").textContent = title;
+  $("#service-notice-message").textContent = privilegedService.message;
+  $("#service-notice-action").textContent = privilegedService.healthy ? "Update now" : "Repair now";
 }
 
 async function refreshPrivilegedService() {
@@ -429,11 +433,11 @@ function renderDevices() {
   $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => {
     const editorKey = `device:${index}`;
     if (expandedEditorKey !== editorKey) {
-      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${escapeHtml(canonicalIdentifier(device.identifier))}</small></span><span class="disclosure">›</span></button>`;
+      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${escapeHtml(canonicalIdentifier(device.identifier))}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
-      <div class="card-title collapsible-card-title" data-collapse-editor-header><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light">›</button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
         <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic (H6001)</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
@@ -794,13 +798,18 @@ $("#connection-hold-seconds").addEventListener("change", async (event) => {
   event.target.value = settings.connectionHoldSeconds;
   await save();
 });
-$("#privileged-service-install").addEventListener("click", async () => {
+async function installPrivilegedService() {
+  const buttons = [$("#privileged-service-install"), $("#service-notice-action")];
+  buttons.forEach((button) => { button.disabled = true; });
   setStatus("Waiting for administrator approval…", "busy");
   try {
     setStatus(await call("install_privileged_service"));
     await refreshPrivilegedService();
   } catch (error) { setStatus(String(error), "error"); }
-});
+  finally { buttons.forEach((button) => { button.disabled = false; }); }
+}
+$("#privileged-service-install").addEventListener("click", installPrivilegedService);
+$("#service-notice-action").addEventListener("click", installPrivilegedService);
 $("#privileged-service-remove").addEventListener("click", async () => {
   setStatus("Waiting for administrator approval…", "busy");
   try {
