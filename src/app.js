@@ -40,6 +40,7 @@ let refreshingConnection = false;
 let demoConnectedUntil = 0;
 let demoEffectActive = false;
 let expandedEditorKey = null;
+const collapsedScheduleIds = new Set();
 let privilegedService = demoMode
   ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
   : { installed: false, healthy: false, current: false, message: "Not installed" };
@@ -371,6 +372,11 @@ function renderPresets() {
 function renderSchedules() {
   const presetOptions = settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
   $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => {
+    if (collapsedScheduleIds.has(schedule.id)) {
+      const [hours, minutes] = schedule.time.split(":").map(Number);
+      const time = new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+    }
     const floodlightAction = schedule.floodlights || "unchanged";
     const approved = Boolean(schedule.privilegedApprovedCommand) && schedule.privilegedApprovedCommand === schedule.shellCommand.trim();
     const hasStaleApproval = Boolean(schedule.privilegedApprovedCommand) && !approved;
@@ -394,11 +400,18 @@ function renderSchedules() {
         : "Runs locally through <code>/bin/zsh -lc</code>.";
     return `
     <article class="editor-card" data-schedule-index="${index}">
-      <div class="card-title"><label class="inline"><input type="checkbox" data-schedule-field="enabled" ${schedule.enabled ? "checked" : ""}><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong></label><button class="remove-button" data-remove-schedule="${index}">Remove</button></div>
+      <div class="card-title collapsible-card-title schedule-title" data-collapse-schedule-header="${escapeHtml(schedule.id)}">
+        <input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${schedule.enabled ? "checked" : ""}>
+        <div class="schedule-name">
+          <button class="schedule-name-button" data-edit-schedule-name title="Edit automation name">${escapeHtml(schedule.name || "Untitled automation")}</button>
+          <textarea class="schedule-name-input" data-schedule-name-input aria-label="Automation name" rows="1" hidden>${escapeHtml(schedule.name)}</textarea>
+        </div>
+        <button class="remove-button" data-remove-schedule="${index}">Remove</button>
+        <button class="collapse-button" data-collapse-schedule="${escapeHtml(schedule.id)}" aria-label="Collapse automation" aria-expanded="true"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+      </div>
       <div class="field-grid">
-        <label class="field">Name<input data-schedule-field="name" value="${escapeHtml(schedule.name)}"></label>
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
-        <label class="field full">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
+        <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
         <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="unchanged" data-schedule-field="floodlights" ${floodlightAction === "unchanged" ? "checked" : ""}>Do nothing</label></span></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
@@ -494,6 +507,34 @@ function uniqueId() {
 }
 
 document.addEventListener("click", async (event) => {
+  const editScheduleName = event.target.closest("[data-edit-schedule-name]");
+  if (editScheduleName) {
+    const input = editScheduleName.parentElement.querySelector("textarea");
+    editScheduleName.hidden = true;
+    input.hidden = false;
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight + 4}px`;
+    input.focus();
+    input.select();
+    return;
+  }
+  const expandSchedule = event.target.closest("[data-expand-schedule]");
+  if (expandSchedule) {
+    const id = expandSchedule.dataset.expandSchedule;
+    collapsedScheduleIds.delete(id);
+    renderSchedules();
+    [...document.querySelectorAll("[data-collapse-schedule]")].find((button) => button.dataset.collapseSchedule === id)?.focus();
+    return;
+  }
+  const collapseSchedule = event.target.closest("[data-collapse-schedule]");
+  const scheduleHeader = event.target.closest("[data-collapse-schedule-header]");
+  if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, textarea"))) {
+    const id = collapseSchedule?.dataset.collapseSchedule || scheduleHeader.dataset.collapseScheduleHeader;
+    collapsedScheduleIds.add(id);
+    renderSchedules();
+    [...document.querySelectorAll("[data-expand-schedule]")].find((button) => button.dataset.expandSchedule === id)?.focus();
+    return;
+  }
   const collapseEditor = event.target.closest("[data-collapse-editor]");
   if (collapseEditor) {
     expandedEditorKey = null;
@@ -631,6 +672,23 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (!event.target.hasAttribute("data-schedule-name-input")) return;
+  const card = event.target.closest("[data-schedule-index]");
+  const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
+  schedule.name = event.target.value;
+  card.querySelector("[data-edit-schedule-name]").textContent = schedule.name || "Untitled automation";
+  event.target.style.height = "auto";
+  event.target.style.height = `${event.target.scrollHeight + 4}px`;
+  save();
+});
+
+document.addEventListener("focusout", (event) => {
+  if (!event.target.hasAttribute("data-schedule-name-input")) return;
+  event.target.hidden = true;
+  event.target.parentElement.querySelector("[data-edit-schedule-name]").hidden = false;
+});
+
 document.addEventListener("change", async (event) => {
   const presetCard = event.target.closest("[data-preset-index]");
   if (presetCard && (event.target.dataset.presetField || event.target.hasAttribute("data-preset-color"))) {
@@ -648,7 +706,7 @@ document.addEventListener("change", async (event) => {
     await save(); renderAll();
   }
   const scheduleCard = event.target.closest("[data-schedule-index]");
-  if (scheduleCard) {
+  if (scheduleCard && (event.target.dataset.scheduleField || event.target.dataset.scheduleLight)) {
     const schedule = settings.schedules[Number(scheduleCard.dataset.scheduleIndex)];
     if (event.target.dataset.scheduleField) {
       const field = event.target.dataset.scheduleField;

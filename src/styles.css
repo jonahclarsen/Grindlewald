@@ -124,6 +124,16 @@ button { cursor: pointer; }
 .approval-state.pending { color: var(--gold); }
 .expanded-editor { padding: 12px; }
 .collapsible-card-title { cursor: pointer; }
+.schedule-summary { grid-template-columns: minmax(0, 1fr) auto; }
+.schedule-title { padding: 5px 0; }
+.schedule-name { flex: 1; min-width: 0; }
+.schedule-name-button, .schedule-name-input { width: 100%; padding: 3px; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: bold; line-height: 1.4; text-align: left; overflow-wrap: anywhere; }
+.schedule-name-button { border: 0; background: none; white-space: pre-wrap; }
+.schedule-name-input { display: block; border: 2px inset var(--border); background: var(--panel); resize: vertical; }
+.schedule-name-input[hidden], .schedule-name-button[hidden] { display: none; }
+.schedule-title .collapse-button { flex-shrink: 0; width: 24px; height: 24px; }
+.schedule-title + .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.schedule-title + .field-grid > .field { min-width: 0; align-content: start; }
 .collapse-button { border: 0; background: none; color: var(--muted); font-size: 20px; transform: rotate(90deg); }
 .connection-setting { margin-top: 14px; grid-template-columns: 1fr auto; align-items: center; }
 .connection-setting small { display: block; margin-top: 3px; }
