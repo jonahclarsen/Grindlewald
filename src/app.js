@@ -399,14 +399,14 @@ function renderSchedules() {
         ? "A dormant administrator approval remains. Revoke it if you no longer need it."
         : "Runs locally through <code>/bin/zsh -lc</code>.";
     return `
-    <article class="editor-card" data-schedule-index="${index}">
+    <article class="editor-card schedule-card" data-schedule-index="${index}">
       <div class="card-title collapsible-card-title schedule-title" data-collapse-schedule-header="${escapeHtml(schedule.id)}">
         <input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${schedule.enabled ? "checked" : ""}>
         <div class="schedule-name">
           <button class="schedule-name-button" data-edit-schedule-name title="Edit automation name">${escapeHtml(schedule.name || "Untitled automation")}</button>
           <textarea class="schedule-name-input" data-schedule-name-input aria-label="Automation name" rows="1" hidden>${escapeHtml(schedule.name)}</textarea>
         </div>
-        <button class="remove-button" data-remove-schedule="${index}">Remove</button>
+        <button class="remove-button schedule-remove" data-remove-schedule="${index}" aria-label="Remove automation" title="Remove automation"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         <button class="collapse-button" data-collapse-schedule="${escapeHtml(schedule.id)}" aria-label="Collapse automation" aria-expanded="true"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
       <div class="field-grid">
@@ -506,14 +506,34 @@ function uniqueId() {
   return globalThis.crypto?.randomUUID?.() || `schedule-${Date.now()}`;
 }
 
+function sizeScheduleNameInput(input) {
+  const style = getComputedStyle(input);
+  const context = document.createElement("canvas").getContext("2d");
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const textWidth = Math.max(...(input.value || " ").split("\n").map((line) => context.measureText(line).width));
+  const inset = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+  input.style.width = `${Math.ceil(textWidth + inset + 1)}px`;
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)}px`;
+}
+
+function confirmScheduleRemoval(schedule) {
+  const dialog = $("#remove-schedule-dialog");
+  $("#remove-schedule-message").textContent = `Remove “${schedule.name || "Untitled automation"}”? This cannot be undone.`;
+  dialog.returnValue = "cancel";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "remove"), { once: true });
+    dialog.showModal();
+  });
+}
+
 document.addEventListener("click", async (event) => {
   const editScheduleName = event.target.closest("[data-edit-schedule-name]");
   if (editScheduleName) {
     const input = editScheduleName.parentElement.querySelector("textarea");
     editScheduleName.hidden = true;
     input.hidden = false;
-    input.style.height = "auto";
-    input.style.height = `${input.scrollHeight + 4}px`;
+    sizeScheduleNameInput(input);
     input.focus();
     input.select();
     return;
@@ -599,6 +619,7 @@ document.addEventListener("click", async (event) => {
   if (removeSchedule) {
     const index = Number(removeSchedule.dataset.removeSchedule);
     const schedule = settings.schedules[index];
+    if (!await confirmScheduleRemoval(schedule)) return;
     if (schedule.privilegedApprovedCommand) {
       setStatus("Revoking administrator approval…", "busy");
       try { await call("revoke_privileged_job", { id: schedule.id }); }
@@ -678,8 +699,7 @@ document.addEventListener("input", (event) => {
   const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
   schedule.name = event.target.value;
   card.querySelector("[data-edit-schedule-name]").textContent = schedule.name || "Untitled automation";
-  event.target.style.height = "auto";
-  event.target.style.height = `${event.target.scrollHeight + 4}px`;
+  sizeScheduleNameInput(event.target);
   save();
 });
 
@@ -894,6 +914,7 @@ $("#close-button").addEventListener("click", () => call("hide_window"));
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 
 document.addEventListener("keydown", (event) => {
+  if ($("#remove-schedule-dialog").open) return;
   const shortcuts = {
     "1": "controller-page",
     "2": "automations-page",

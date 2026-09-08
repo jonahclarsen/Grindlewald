@@ -125,13 +125,21 @@ button { cursor: pointer; }
 .expanded-editor { padding: 12px; }
 .collapsible-card-title { cursor: pointer; }
 .schedule-summary { grid-template-columns: minmax(0, 1fr) auto; }
-.schedule-title { padding: 5px 0; }
+.editor-card.schedule-card { padding: 11px; }
+.schedule-title { margin: -11px -11px 0; padding: 16px 11px 5px; }
 .schedule-name { flex: 1; min-width: 0; }
-.schedule-name-button, .schedule-name-input { width: 100%; padding: 3px; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: bold; line-height: 1.4; text-align: left; overflow-wrap: anywhere; }
+.schedule-name-button, .schedule-name-input { width: fit-content; max-width: 100%; padding: 3px; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: bold; line-height: 1.4; text-align: left; overflow-wrap: anywhere; }
 .schedule-name-button { border: 0; background: none; white-space: pre-wrap; }
 .schedule-name-input { display: block; border: 2px inset var(--border); background: var(--panel); resize: vertical; }
 .schedule-name-input[hidden], .schedule-name-button[hidden] { display: none; }
 .schedule-title .collapse-button { flex-shrink: 0; width: 24px; height: 24px; }
+.schedule-title .schedule-remove { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; padding: 0; }
+.schedule-remove .ui-icon { width: 16px; height: 16px; }
+.confirmation-dialog { width: min(340px, calc(100vw - 32px)); padding: 18px; color: var(--ink); background: var(--panel); border: 2px solid var(--border); }
+.confirmation-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.confirmation-dialog h3 { margin: 0 0 10px; }
+.confirmation-dialog p { line-height: 1.5; overflow-wrap: anywhere; }
+.confirmation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .schedule-title + .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .schedule-title + .field-grid > .field { min-width: 0; align-content: start; }
 .collapse-button { border: 0; background: none; color: var(--muted); font-size: 20px; transform: rotate(90deg); }
