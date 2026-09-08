@@ -51,6 +51,10 @@ That file is local runtime data. It is ignored by Git and is never compiled into
 
 The Floodlights buttons run `shortcut_set_floodlights.py on` or `shortcut_set_floodlights.py off` from the parent Govee project. Grindlewald uses the `govee` Miniconda environment when it is available. Set `GRINDLEWALD_FLOODLIGHT_SCRIPT` or `GRINDLEWALD_FLOODLIGHT_PYTHON` in the app environment to override either path without storing machine-specific configuration in this repository.
 
+Errors appear in a compact panel above the navigation without moving the controls. The panel shows a short explanation and a scrollable monospace preview positioned at the end of the error. **Show details** expands the preview; **Copy error** copies the complete original message, including the traceback. Errors stay available across pages and later status updates until dismissed or replaced by another error.
+
+If floodlight control reports `Bad file descriptor` while connecting to TP-Link, check whether a firewall such as Little Snitch is blocking Grindlewald or its Python subprocess from reaching `wap.tplinkcloud.com` over HTTPS. A successful connection from Terminal alone does not verify network access for the menu-bar app.
+
 ## Command-line control
 
 The menu-bar app must be running because `grindlewaldctl` sends commands to its private local socket. Build or install the CLI once:

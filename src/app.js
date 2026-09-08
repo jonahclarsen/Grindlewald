@@ -1,5 +1,8 @@
+import { createErrorPanel, summarizeError } from "./errors.js";
+
 const invoke = window.__TAURI__?.core?.invoke;
 const demoMode = !invoke;
+const showError = createErrorPanel(invoke);
 
 const demoSettings = {
   devices: [
@@ -161,8 +164,9 @@ function makeDraggable(track, update) {
 }
 
 function setStatus(message, kind = "ready") {
-  $("#status").textContent = message;
+  $("#status").textContent = kind === "error" ? summarizeError(message) : message;
   $("#status-dot").className = kind === "ready" ? "" : kind;
+  if (kind === "error") showError(message);
 }
 
 function setDiscoveryBusy(isBusy) {

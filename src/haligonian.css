@@ -78,7 +78,22 @@ h3 { font-size: 12px; color: var(--ice); }
 .page::-webkit-scrollbar { display: block; width: 5px; }
 .page::-webkit-scrollbar-thumb { background: var(--teal); }
 .eyebrow { font: bold 10px var(--pixel); letter-spacing: 1px; }
-.controller-status { margin-bottom: 7px; padding: 0; color: var(--green); }
+.controller-status { margin-bottom: 7px; padding: 0; color: var(--green); height: 14px; min-width: 0; text-transform: none; letter-spacing: 0; }
+#status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#status-dot { flex-shrink: 0; }
+#status-dot.error + #status { color: #ffb4aa; }
+.error-panel { position: absolute; z-index: 10; bottom: 66px; left: 12px; right: 12px; padding: 10px; background: #222; border: 1px solid #ed9890; box-shadow: 0 6px 24px #000b; }
+.error-panel[hidden] { display: none; }
+.error-heading { display: flex; align-items: center; gap: 8px; color: #ffb4aa; }
+.error-heading .icon-button { margin-left: auto; }
+#error-summary { margin-top: 6px; font: 12px/1.4 Arial, sans-serif; overflow-wrap: anywhere; }
+#error-details { height: 44px; overflow: auto; overscroll-behavior: contain; margin: 9px 0; padding: 6px; background: #141414; color: #e3c4c0; border: 1px solid #58403c; font: 11px/16px Menlo, Monaco, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; text-transform: none; letter-spacing: 0; scrollbar-width: thin; }
+.error-panel.expanded #error-details { height: min(160px, 25vh); }
+.error-actions { display: flex; justify-content: space-between; gap: 8px; }
+.error-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.error-actions .ui-icon { width: 14px; height: 14px; }
+#error-toggle[aria-expanded="true"] .ui-icon { transform: rotate(180deg); }
+.error-panel button:focus-visible, #error-details:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
 #status-dot, #connection-dot, .enabled-dot { border-radius: 0; box-shadow: none; }
 .floodlight-card, .picker-card, .control-card, .editor-card, .compact-editor-card, .experimental-card {
   border: 2px solid var(--teal-dark);

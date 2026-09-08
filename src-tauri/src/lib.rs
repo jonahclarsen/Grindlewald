@@ -206,6 +206,31 @@ async fn set_floodlights(on: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn copy_error_details(text: String) -> Result<(), String> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let mut child = tokio::process::Command::new("/usr/bin/pbcopy")
+        .env("LC_CTYPE", "en_US.UTF-8")
+        .stdin(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("Could not open the clipboard: {error}"))?;
+    let mut stdin = child.stdin.take().ok_or("Clipboard input is unavailable")?;
+    stdin
+        .write_all(text.as_bytes())
+        .await
+        .map_err(|error| format!("Could not copy error details: {error}"))?;
+    drop(stdin);
+    let status = child.wait().await.map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Could not copy error details. Select the text and press Command-C.".into())
+    }
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -311,6 +336,7 @@ pub fn run() {
             revoke_privileged_job,
             uninstall_privileged_service,
             set_floodlights,
+            copy_error_details,
             hide_window,
             quit_app,
         ])

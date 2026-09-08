@@ -27,7 +27,7 @@
           <button id="service-notice-action" class="primary compact">Update now</button>
         </aside>
 
-        <div class="controller-status eyebrow"><span id="status-dot"></span><span id="status">Ready</span></div>
+        <div class="controller-status eyebrow" role="status"><span id="status-dot" aria-hidden="true"></span><span id="status">Ready</span></div>
 
         <div class="floodlight-card">
           <span class="floodlight-title"><svg class="mode-icon ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><strong>Floodlights</strong></span>
@@ -138,6 +138,19 @@
         <div id="device-editor" class="stack"></div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
+
+      <aside id="error-panel" class="error-panel" aria-label="Error details" hidden>
+        <div class="error-heading">
+          <strong>Something went wrong</strong>
+          <button id="error-dismiss" class="icon-button" aria-label="Dismiss error"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <p id="error-summary" role="alert"></p>
+        <pre id="error-details" tabindex="0" aria-label="Full error, scrolled to the end"></pre>
+        <div class="error-actions">
+          <button id="error-toggle" class="secondary compact" aria-expanded="false" aria-controls="error-details"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><span id="error-toggle-label">Show details</span></button>
+          <button id="error-copy" class="primary compact"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="1"/><path d="M16 8V3H3v13h5"/></svg><span id="error-copy-label" aria-live="polite">Copy error</span></button>
+        </div>
+      </aside>
 
       <nav aria-label="Main navigation">
         <button class="nav-item active" data-page="controller-page" title="Control (⌘1)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><path d="M2 8h6m1 8h6m1-10h6"/></svg>Control<kbd>⌘1</kbd></button>
