@@ -128,7 +128,7 @@ function whitePositionFromHex(value) {
 }
 
 function updateHue(hue, shouldSend = true) {
-  const normalizedHue = ((hue % 360) + 360) % 360;
+  const normalizedHue = Math.max(0, Math.min(360, hue));
   settings.color = colorAtHue(normalizedHue);
   $("#hue-knob").style.setProperty("--knob-position", `${normalizedHue / 360 * 100}%`);
   $("#color-swatch").style.background = settings.color;
@@ -378,10 +378,10 @@ function renderSchedules() {
       ? "Install service first"
       : !privilegedService.healthy
         ? "Repair service first"
-        : approved ? "Approve again" : "Approve root command";
+        : "Approve root command";
     const approvalControls = schedule.runAsAdministrator || schedule.privilegedApprovedCommand ? `
       <div class="approval-row field full">
-        ${schedule.runAsAdministrator ? `<button class="${approved ? "secondary" : "primary"} compact" data-approve-privileged="${escapeHtml(schedule.id)}">${approveLabel}</button>` : ""}
+        ${schedule.runAsAdministrator && !approved ? `<button class="primary compact" data-approve-privileged="${escapeHtml(schedule.id)}">${approveLabel}</button>` : ""}
         ${schedule.privilegedApprovedCommand ? `<button class="text-button" data-revoke-privileged="${escapeHtml(schedule.id)}">Revoke</button>` : ""}
         <span class="approval-state ${approved ? "" : "pending"}">${approved ? "Approved for unattended use" : hasStaleApproval ? "Command changed · approval required" : "Approval required"}</span>
       </div>` : "";
@@ -678,7 +678,7 @@ makeDraggable($("#white-track"), updateWhite);
 $("#hue-track").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
-  updateHue(hueFromHex(settings.color) + (event.key === "ArrowRight" ? 3 : -3));
+  updateHue(Number(event.currentTarget.getAttribute("aria-valuenow")) + (event.key === "ArrowRight" ? 3 : -3));
   save();
 });
 $("#white-track").addEventListener("keydown", (event) => {
