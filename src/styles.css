@@ -127,6 +127,8 @@ button { cursor: pointer; }
 .schedule-summary { grid-template-columns: minmax(0, 1fr) auto; }
 .editor-card.schedule-card { padding: 11px; }
 .schedule-title { margin: -11px -11px 0; padding: 16px 11px 5px; }
+.schedule-enable { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; cursor: pointer; }
+.schedule-enable input { margin: 0; cursor: pointer; }
 .schedule-name { flex: 1; min-width: 0; }
 .schedule-disable { flex-shrink: 0; max-width: 100px; padding: 4px; color: var(--ink); background: var(--panel); border: 1px solid var(--border); font-size: 11px; cursor: pointer; }
 .schedule-pause-status { color: var(--gold); }

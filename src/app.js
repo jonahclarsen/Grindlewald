@@ -406,7 +406,7 @@ function renderSchedules() {
     return `
     <article class="editor-card schedule-card" data-schedule-index="${index}">
       <div class="card-title collapsible-card-title schedule-title" data-collapse-schedule-header="${escapeHtml(schedule.id)}">
-        <input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${enabled ? "checked" : ""}>
+        <label class="schedule-enable"><input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${enabled ? "checked" : ""}></label>
         <div class="schedule-name">
           <button class="schedule-name-button" data-edit-schedule-name title="Edit automation name">${escapeHtml(schedule.name || "Untitled automation")}</button>
           <textarea class="schedule-name-input" data-schedule-name-input aria-label="Automation name" rows="1" hidden>${escapeHtml(schedule.name)}</textarea>
@@ -576,7 +576,7 @@ document.addEventListener("click", async (event) => {
   }
   const collapseSchedule = event.target.closest("[data-collapse-schedule]");
   const scheduleHeader = event.target.closest("[data-collapse-schedule-header]");
-  if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, select, option, textarea"))) {
+  if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, select, option, textarea, label"))) {
     const id = collapseSchedule?.dataset.collapseSchedule || scheduleHeader.dataset.collapseScheduleHeader;
     collapsedScheduleIds.add(id);
     renderSchedules();
