@@ -1,5 +1,6 @@
 # Repository instructions
 
+- Do all work in a separate Git worktree. Only bring completed, verified changes into this main checkout once the work is done, then commit and push as required below. The user may explicitly waive this workflow for a task.
 - Never publish secrets, credentials, private device identifiers, personal paths, or local runtime data. Before every push, inspect both the staged diff and repository history for sensitive values.
 - Always commit and push any changes the user asked for immediately after implementing and verifying them.
 - Prefer `pnpm` over `npm`.

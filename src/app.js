@@ -1,4 +1,5 @@
 import { createErrorPanel, summarizeError } from "./errors.js";
+import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const demoMode = !invoke;
@@ -297,8 +298,10 @@ async function save() {
   try {
     await call("save_settings", { settings });
     setStatus("Saved");
+    return true;
   } catch (error) {
     setStatus(String(error), "error");
+    return false;
   }
 }
 
@@ -372,10 +375,12 @@ function renderPresets() {
 function renderSchedules() {
   const presetOptions = settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
   $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => {
+    const enabled = isScheduleEnabled(schedule);
+    const pauseLabel = schedulePauseLabel(schedule);
     if (collapsedScheduleIds.has(schedule.id)) {
       const [hours, minutes] = schedule.time.split(":").map(Number);
       const time = new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     const floodlightAction = schedule.floodlights || "unchanged";
     const approved = Boolean(schedule.privilegedApprovedCommand) && schedule.privilegedApprovedCommand === schedule.shellCommand.trim();
@@ -401,15 +406,20 @@ function renderSchedules() {
     return `
     <article class="editor-card schedule-card" data-schedule-index="${index}">
       <div class="card-title collapsible-card-title schedule-title" data-collapse-schedule-header="${escapeHtml(schedule.id)}">
-        <input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${schedule.enabled ? "checked" : ""}>
+        <input type="checkbox" data-schedule-field="enabled" aria-label="Enable automation" ${enabled ? "checked" : ""}>
         <div class="schedule-name">
           <button class="schedule-name-button" data-edit-schedule-name title="Edit automation name">${escapeHtml(schedule.name || "Untitled automation")}</button>
           <textarea class="schedule-name-input" data-schedule-name-input aria-label="Automation name" rows="1" hidden>${escapeHtml(schedule.name)}</textarea>
         </div>
+        <select class="schedule-disable" data-disable-schedule aria-label="Disable automation for" ${enabled ? "" : "hidden disabled"}>
+          <option value="" selected disabled>Disable for</option>
+          ${Array.from({ length: 8 }, (_, index) => `<option value="${index + 1}">${index + 1} ${index === 0 ? "day" : "days"}</option>`).join("")}
+        </select>
         <button class="remove-button schedule-remove" data-remove-schedule="${index}" aria-label="Remove automation" title="Remove automation"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         <button class="collapse-button" data-collapse-schedule="${escapeHtml(schedule.id)}" aria-label="Collapse automation" aria-expanded="true"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
       <div class="field-grid">
+        <small class="field full schedule-pause-status" data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small>
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
@@ -444,6 +454,24 @@ function renderPrivilegedService() {
 async function refreshPrivilegedService() {
   privilegedService = await call("privileged_service_status");
   renderPrivilegedService();
+}
+
+function refreshScheduleAvailability() {
+  if (!settings) return;
+  document.querySelectorAll("[data-schedule-pause-status]").forEach((status) => {
+    const schedule = settings.schedules[Number(status.dataset.schedulePauseStatus)];
+    if (!schedule) return;
+    const label = schedulePauseLabel(schedule);
+    status.textContent = label;
+    status.hidden = !label;
+    const card = status.closest("[data-schedule-index]");
+    if (!card) return;
+    const enabled = isScheduleEnabled(schedule);
+    card.querySelector('[data-schedule-field="enabled"]').checked = enabled;
+    const dropdown = card.querySelector("[data-disable-schedule]");
+    dropdown.hidden = !enabled;
+    dropdown.disabled = !enabled;
+  });
 }
 
 function renderDevices() {
@@ -548,7 +576,7 @@ document.addEventListener("click", async (event) => {
   }
   const collapseSchedule = event.target.closest("[data-collapse-schedule]");
   const scheduleHeader = event.target.closest("[data-collapse-schedule-header]");
-  if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, textarea"))) {
+  if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, select, option, textarea"))) {
     const id = collapseSchedule?.dataset.collapseSchedule || scheduleHeader.dataset.collapseScheduleHeader;
     collapsedScheduleIds.add(id);
     renderSchedules();
@@ -726,17 +754,32 @@ document.addEventListener("change", async (event) => {
     await save(); renderAll();
   }
   const scheduleCard = event.target.closest("[data-schedule-index]");
+  if (scheduleCard && event.target.hasAttribute("data-disable-schedule")) {
+    const schedule = settings.schedules[Number(scheduleCard.dataset.scheduleIndex)];
+    const previousDeadline = schedule.disabledUntil;
+    try {
+      disableScheduleFor(schedule, Number(event.target.value));
+      if (!await save()) schedule.disabledUntil = previousDeadline;
+    } catch (error) {
+      setStatus(String(error), "error");
+    }
+    renderSchedules();
+    return;
+  }
   if (scheduleCard && (event.target.dataset.scheduleField || event.target.dataset.scheduleLight)) {
     const schedule = settings.schedules[Number(scheduleCard.dataset.scheduleIndex)];
+    const previous = structuredClone(schedule);
     if (event.target.dataset.scheduleField) {
       const field = event.target.dataset.scheduleField;
       schedule[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+      if (field === "enabled") schedule.disabledUntil = null;
     }
     if (event.target.dataset.scheduleLight) {
       const light = event.target.dataset.scheduleLight;
       schedule.lights = event.target.checked ? [...new Set([...schedule.lights, light])] : schedule.lights.filter((name) => name !== light);
     }
-    await save(); renderSchedules();
+    if (!await save()) Object.assign(schedule, previous);
+    renderSchedules();
   }
   const deviceCard = event.target.closest("[data-device-index]");
   if (deviceCard && event.target.dataset.deviceField) {
@@ -907,6 +950,8 @@ $("#privileged-service-remove").addEventListener("click", async () => {
 });
 $("#connection-button").addEventListener("click", disconnectLights);
 window.addEventListener("focus", refreshConnection);
+window.addEventListener("focus", refreshScheduleAvailability);
+setInterval(refreshScheduleAvailability, 1000);
 setInterval(refreshConnection, 500);
 refreshConnection();
 

@@ -489,7 +489,9 @@ impl SharedState {
                     for schedule in settings
                         .schedules
                         .into_iter()
-                        .filter(|schedule| schedule.enabled && schedule.time == minute)
+                        .filter(|schedule| {
+                            schedule.is_enabled_at(now.timestamp_millis()) && schedule.time == minute
+                        })
                     {
                         let key = format!("{today}:{}", schedule.id);
                         if triggered.insert(key) {

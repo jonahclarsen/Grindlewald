@@ -53,6 +53,9 @@ pub struct Schedule {
     pub time: String,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
+    /// Temporary override of `enabled`, as Unix epoch milliseconds. Expiry needs no write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_until: Option<i64>,
     #[serde(default)]
     pub lights: Vec<String>,
     pub preset: String,
@@ -66,6 +69,12 @@ pub struct Schedule {
     pub privileged_approved_command: String,
     #[serde(default)]
     pub privileged_approved_at: String,
+}
+
+impl Schedule {
+    pub fn is_enabled_at(&self, now_millis: i64) -> bool {
+        self.enabled && self.disabled_until.is_none_or(|until| now_millis >= until)
+    }
 }
 
 fn enabled_by_default() -> bool {
@@ -427,6 +436,7 @@ mod tests {
                 name: "Test".into(),
                 time: "12:00".into(),
                 enabled: true,
+                disabled_until: None,
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],
                 preset: "daytime".into(),
                 floodlights: FloodlightAction::Unchanged,
@@ -456,5 +466,33 @@ mod tests {
         .unwrap();
 
         assert_eq!(schedule.floodlights, FloodlightAction::Unchanged);
+        assert_eq!(schedule.disabled_until, None);
+        assert!(schedule.is_enabled_at(0));
+    }
+
+    #[test]
+    fn schedule_pause_survives_reload_and_expires_at_its_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let deadline = 1_800_000_000_000_i64;
+        let schedule: Schedule = serde_json::from_value(serde_json::json!({
+            "id": "paused", "name": "Paused automation", "time": "20:00",
+            "preset": "daytime", "enabled": true, "disabledUntil": deadline
+        }))
+        .unwrap();
+        let settings = Settings {
+            schedules: vec![schedule],
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        let mut restored = load(&path).unwrap().schedules.remove(0);
+        assert_eq!(restored.disabled_until, Some(deadline));
+        assert!(!restored.is_enabled_at(deadline - 1));
+        assert!(restored.is_enabled_at(deadline));
+        assert!(restored.is_enabled_at(deadline + 1));
+        restored.enabled = false;
+        assert!(!restored.is_enabled_at(deadline + 1));
+        restored.disabled_until = None;
+        assert!(!restored.is_enabled_at(deadline + 1));
     }
 }
