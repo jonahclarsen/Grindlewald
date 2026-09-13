@@ -121,6 +121,10 @@ The installer creates a debug-mode `Grindlewald.app` container in `~/Application
 
 The development runner launches each build from inside the signed container, and the agent is associated with the Grindlewald bundle identifier. Bluetooth permission and the System Settings Background Items entry therefore use **Grindlewald** instead of a shell or generic development process. Logs are written under `~/Library/Logs/Grindlewald`. Re-run the installer only if the repository moves or the LaunchAgent scripts change.
 
+Development builds use a **Developer ID Application** certificate from your login keychain, including every rebuild. The first successful signing saves the certificate fingerprint in `~/Library/Application Support/Grindlewald/dev-signing-identity`; subsequent builds require that certificate and never fall back to ad-hoc signing. If multiple certificates are available, set `GRINDLEWALD_SIGNING_IDENTITY` to the desired SHA-1 fingerprint reported by `security find-identity -v -p codesigning` when running the installer. The saved selection also applies to unattended rebuilds. Local development builds are not notarized.
+
+Moving from ad-hoc signing to Developer ID signing changes the app identity once, so Little Snitch and macOS permissions may need one more approval. Later rebuilds keep the same signing identity and bundle identifier.
+
 Remove it with:
 
 ```sh

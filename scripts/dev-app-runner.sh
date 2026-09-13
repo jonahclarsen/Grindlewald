@@ -22,11 +22,13 @@ if [[ ! -d "$app_path/Contents/MacOS" ]]; then
   exit 1
 fi
 
+source "$script_dir/dev-signing.sh"
+resolve_dev_signing_identity
+
 temporary_executable="$app_path/Contents/MacOS/grindlewald.dev-new"
 /bin/cp "$built_executable" "$temporary_executable"
 /bin/chmod +x "$temporary_executable"
 /bin/mv -f "$temporary_executable" "$executable"
-/usr/bin/codesign --force --deep --sign - \
-  --identifier com.jonahclarsen.grindlewald "$app_path"
+sign_dev_app "$app_path"
 
 exec "$executable" "$@"

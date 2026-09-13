@@ -17,6 +17,9 @@ agent_path="$agent_dir/$label.plist"
 template="$script_dir/$label.plist.template"
 temporary="$(mktemp)"
 
+source "$script_dir/dev-signing.sh"
+resolve_dev_signing_identity
+
 echo "Building the branded debug app bundle…"
 cd "$repo_dir"
 pnpm tauri build --debug --bundles app
@@ -24,8 +27,7 @@ pnpm tauri build --debug --bundles app
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
 mkdir -p "$app_dir" "$agent_dir" "$log_dir"
 /usr/bin/ditto "$app_source" "$app_path"
-/usr/bin/codesign --force --deep --sign - \
-  --identifier com.jonahclarsen.grindlewald "$app_path"
+sign_dev_app "$app_path"
 
 sed \
   -e "s|__EXECUTABLE__|$executable|g" \
