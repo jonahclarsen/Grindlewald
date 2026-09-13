@@ -29,6 +29,9 @@ const demoSettings = {
 };
 
 let settings;
+let currentWifiSsid = null;
+let wifiRequest = 0;
+const wifiSelections = new Map();
 let discovered = [];
 let pendingControl = null;
 let sendingControl = false;
@@ -272,6 +275,7 @@ async function callBackend(command, args = {}) {
       demoEffectActive = ["party", "breathe"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
+    if (command === "current_wifi_ssid") return "Demo Wi-Fi";
     if (command === "get_settings") return structuredClone(demoSettings);
     if (command === "discover_lights") return [
       { name: "Govee H6005", identifier: "local-ble-id-1" },
@@ -337,7 +341,25 @@ function setEffectActive(effect) {
   });
 }
 
+async function refreshWifiSsid() {
+  const request = ++wifiRequest;
+  let ssid = null;
+  try {
+    ssid = await call("current_wifi_ssid");
+    if (request === wifiRequest) currentWifiSsid = ssid;
+  } catch (error) {
+    if (request === wifiRequest) currentWifiSsid = null;
+    setStatus(String(error), "error");
+  }
+  document.querySelectorAll("[data-wifi-label]").forEach((label) => {
+    const schedule = settings.schedules[Number(label.dataset.wifiLabel)];
+    label.textContent = `Turn on if on WiFi: ${schedule.floodlights === "on_wifi" ? schedule.floodlightSsid || "Unavailable" : currentWifiSsid || "Unavailable"}`;
+  });
+  return ssid;
+}
+
 function showPage(pageId) {
+  if (pageId === "automations-page") void refreshWifiSsid();
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === pageId));
 }
@@ -423,7 +445,7 @@ function renderSchedules() {
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
-        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="unchanged" data-schedule-field="floodlights" ${floodlightAction === "unchanged" ? "checked" : ""}>Do nothing</label></span></div>
+        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_wifi" data-floodlight-wifi ${floodlightAction === "on_wifi" ? "checked" : ""}><span data-wifi-label="${index}">Turn on if on WiFi: ${escapeHtml((floodlightAction === "on_wifi" ? schedule.floodlightSsid : currentWifiSsid) || "Unavailable")}</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
@@ -737,6 +759,27 @@ document.addEventListener("focusout", (event) => {
   event.target.parentElement.querySelector("[data-edit-schedule-name]").hidden = false;
 });
 
+// A click also fires when the radio is already selected, allowing SSID recapture.
+document.addEventListener("click", async (event) => {
+  if (!event.target.matches("[data-floodlight-wifi]")) return;
+  const card = event.target.closest("[data-schedule-index]");
+  const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
+  const previous = structuredClone(schedule);
+  const selection = Symbol();
+  wifiSelections.set(schedule.id, selection);
+  const ssid = await refreshWifiSsid();
+  if (wifiSelections.get(schedule.id) !== selection || !settings.schedules.includes(schedule)) return;
+  if (!ssid) {
+    setStatus("Could not read the current Wi-Fi SSID. Connect to Wi-Fi and try again.", "error");
+    renderSchedules();
+    return;
+  }
+  schedule.floodlights = "on_wifi";
+  schedule.floodlightSsid = ssid;
+  if (!await save()) Object.assign(schedule, previous);
+  renderSchedules();
+});
+
 document.addEventListener("change", async (event) => {
   const presetCard = event.target.closest("[data-preset-index]");
   if (presetCard && (event.target.dataset.presetField || event.target.hasAttribute("data-preset-color"))) {
@@ -773,6 +816,11 @@ document.addEventListener("change", async (event) => {
       const field = event.target.dataset.scheduleField;
       schedule[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
       if (field === "enabled") schedule.disabledUntil = null;
+      if (field === "floodlights") {
+        wifiSelections.delete(schedule.id);
+        schedule.floodlightSsid = null;
+        await refreshWifiSsid();
+      }
     }
     if (event.target.dataset.scheduleLight) {
       const light = event.target.dataset.scheduleLight;
@@ -895,7 +943,8 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  const ssid = await refreshWifiSsid();
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "on_wifi", floodlightSsid: ssid, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {

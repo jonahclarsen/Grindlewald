@@ -42,6 +42,7 @@ pub enum FloodlightAction {
     Unchanged,
     On,
     Off,
+    OnWifi,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,6 +62,8 @@ pub struct Schedule {
     pub preset: String,
     #[serde(default)]
     pub floodlights: FloodlightAction,
+    #[serde(default)]
+    pub floodlight_ssid: Option<String>,
     #[serde(default)]
     pub shell_command: String,
     #[serde(default)]
@@ -440,6 +443,7 @@ mod tests {
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],
                 preset: "daytime".into(),
                 floodlights: FloodlightAction::Unchanged,
+                floodlight_ssid: None,
                 shell_command: String::new(),
                 run_as_administrator: false,
                 privileged_approved_command: String::new(),
@@ -466,8 +470,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(schedule.floodlights, FloodlightAction::Unchanged);
+        assert_eq!(schedule.floodlight_ssid, None);
         assert_eq!(schedule.disabled_until, None);
         assert!(schedule.is_enabled_at(0));
+    }
+
+    #[test]
+    fn wifi_selection_survives_settings_reload() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let schedule: Schedule = serde_json::from_value(serde_json::json!({
+            "id": "wifi", "name": "Wi-Fi automation", "time": "20:00",
+            "preset": "daytime", "floodlights": "on_wifi", "floodlightSsid": "Test Network"
+        }))
+        .unwrap();
+        let settings = Settings {
+            schedules: vec![schedule],
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.schedules[0].floodlights, FloodlightAction::OnWifi);
+        assert_eq!(
+            restored.schedules[0].floodlight_ssid.as_deref(),
+            Some("Test Network")
+        );
     }
 
     #[test]

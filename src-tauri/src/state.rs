@@ -394,6 +394,19 @@ impl SharedState {
         let floodlights = async move {
             match schedule.floodlights {
                 FloodlightAction::Unchanged => Ok(None),
+                FloodlightAction::OnWifi => {
+                    let current = crate::wifi::current_wifi_ssid().await?;
+                    if crate::wifi::matches_saved_ssid(
+                        schedule.floodlight_ssid.as_deref(),
+                        current.as_deref(),
+                    ) {
+                        crate::run_floodlights(true).await.map(Some)
+                    } else {
+                        Ok(Some(
+                            "Floodlights skipped: saved Wi-Fi is not connected".into(),
+                        ))
+                    }
+                }
                 FloodlightAction::On => crate::run_floodlights(true).await.map(Some),
                 FloodlightAction::Off => crate::run_floodlights(false).await.map(Some),
             }
