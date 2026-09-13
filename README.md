@@ -109,6 +109,8 @@ The helper runs approved commands through `/bin/zsh -lc` with a clean root envir
 
 The unattended sudo policy is limited to the helper plus an argument expression equivalent to `run <letters-numbers-or-hyphens>`. Installation, approval, revocation, and removal are not covered by that policy and always go back through macOS authorization. Any process already running as your macOS account could request execution of a known approved job ID, but it cannot change that job or supply new root command text; revoke jobs whose fixed operation would be unsafe to trigger unexpectedly.
 
+The installer verifies the copied executable against the app's SHA-256 digest, then applies and verifies a standalone ad-hoc signature before installing the root-owned helper. The app keeps its Developer ID signature. A root-owned receipt records both digests so update checks remain accurate after re-signing. Helpers installed before this receipt was introduced need a one-time repair through **Privileged automations**; existing job approvals are preserved.
+
 ## Start automatically in live development mode
 
 To install the included per-user LaunchAgent:

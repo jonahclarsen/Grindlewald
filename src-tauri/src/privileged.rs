@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const HELPER_PATH: &str = "/Library/PrivilegedHelperTools/com.jonahclarsen.grindlewald.privileged";
+const RECEIPT_PATH: &str =
+    "/Library/PrivilegedHelperTools/com.jonahclarsen.grindlewald.privileged.receipt";
 const JOBS_DIRECTORY: &str = "/Library/Application Support/Grindlewald/PrivilegedJobs";
 const SUDOERS_PATH: &str = "/private/etc/sudoers.d/grindlewald";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
@@ -30,6 +32,12 @@ pub struct ServiceStatus {
 struct ApprovedJob {
     id: String,
     command: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InstallReceipt {
+    application_digest: String,
+    helper_digest: String,
 }
 
 pub fn maybe_run_helper() -> Option<i32> {
@@ -86,16 +94,29 @@ pub fn service_status() -> ServiceStatus {
         };
     }
 
-    let current = std::env::current_exe()
+    // Signing the standalone helper changes its bytes. A root-owned receipt
+    // binds those bytes to the original app, without relying on app versions.
+    let receipt = fs::symlink_metadata(RECEIPT_PATH)
         .ok()
-        .and_then(|executable| sha256_file(&executable).ok())
-        .zip(sha256_file(Path::new(HELPER_PATH)).ok())
-        .is_some_and(|(application, helper)| application == helper);
+        .filter(|value| value.is_file() && value.uid() == 0 && value.mode() & 0o022 == 0)
+        .and_then(|_| fs::read(RECEIPT_PATH).ok())
+        .and_then(|bytes| serde_json::from_slice::<InstallReceipt>(&bytes).ok());
+    let healthy = receipt.as_ref().is_some_and(|receipt| {
+        file_digest(Path::new(HELPER_PATH)).is_ok_and(|digest| digest == receipt.helper_digest)
+    });
+    let current = healthy
+        && std::env::current_exe()
+            .ok()
+            .and_then(|executable| file_digest(&executable).ok())
+            .zip(receipt)
+            .is_some_and(|(application, receipt)| application == receipt.application_digest);
     ServiceStatus {
         installed: true,
-        healthy: true,
+        healthy,
         current,
-        message: if current {
+        message: if !healthy {
+            "Installation needs repair".into()
+        } else if current {
             "Ready for unattended administrator jobs".into()
         } else {
             "Helper update available".into()
@@ -139,8 +160,11 @@ fn installation_script(executable: &Path, digest: &str, username: &str) -> Resul
         "set -eu; temporary={temporary}; trap '/bin/rm -f -- \"$temporary\"' EXIT; \
          /usr/bin/install -o root -g wheel -m 0755 {source} \"$temporary\"; \
          actual=$(/usr/bin/shasum -a 256 \"$temporary\" | /usr/bin/cut -d ' ' -f 1); \
-         test \"$actual\" = {expected_digest}; /bin/mv -f \"$temporary\" {destination}; \
-         trap - EXIT; {destination} finish-install {account}"
+         test \"$actual\" = {expected_digest}; \
+         /usr/bin/codesign --force --sign - --identifier com.jonahclarsen.grindlewald.privileged \"$temporary\"; \
+         /usr/bin/codesign --verify --strict \"$temporary\"; \
+         /bin/mv -f \"$temporary\" {destination}; \
+         trap - EXIT; {destination} finish-install {account} {expected_digest}"
     ))
 }
 
@@ -217,9 +241,26 @@ fn dispatch_helper(arguments: &[String]) -> Result<i32, String> {
             print!("{}", helper_version());
             Ok(0)
         }
-        [operation, username] if operation == "finish-install" => {
+        [operation, username, application_digest] if operation == "finish-install" => {
             require_root()?;
+            if application_digest.len() != 64
+                || !application_digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err("application digest is invalid".into());
+            }
             finish_install_as_root(username)?;
+            let receipt = InstallReceipt {
+                application_digest: application_digest.to_ascii_lowercase(),
+                helper_digest: file_digest(Path::new(HELPER_PATH))?,
+            };
+            let temporary = PathBuf::from(format!("{RECEIPT_PATH}.new-{}", std::process::id()));
+            let contents = serde_json::to_vec(&receipt).map_err(|error| error.to_string())?;
+            write_new_file(&temporary, &contents, 0o644)?;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o644))
+                .map_err(|error| error.to_string())?;
+            fs::rename(&temporary, RECEIPT_PATH).map_err(|error| error.to_string())?;
             Ok(0)
         }
         [operation, manifest, digest] if operation == "approve" => {
@@ -335,6 +376,9 @@ fn run_as_root(id: &str) -> Result<i32, String> {
 }
 
 fn uninstall_as_root() -> Result<(), String> {
+    if Path::new(RECEIPT_PATH).exists() {
+        fs::remove_file(RECEIPT_PATH).map_err(|error| error.to_string())?;
+    }
     if Path::new(SUDOERS_PATH).exists() {
         fs::remove_file(SUDOERS_PATH).map_err(|error| error.to_string())?;
     }
@@ -497,6 +541,13 @@ fn sha256_file(path: &Path) -> Result<Vec<u8>, String> {
     Ok(hasher.finalize().to_vec())
 }
 
+fn file_digest(path: &Path) -> Result<String, String> {
+    Ok(sha256_file(path)?
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -548,18 +599,26 @@ mod tests {
     }
 
     #[test]
-    fn generated_installation_script_is_valid_zsh() {
+    fn generated_installation_script_is_valid_sh() {
         let script = installation_script(
             Path::new("/Applications/Grindlewald's Test.app/Contents/MacOS/grindlewald"),
             &"a".repeat(64),
             "sampleuser",
         )
         .unwrap();
-        let status = Command::new("/bin/zsh")
+        let status = Command::new("/bin/sh")
             .args(["-n", "-c", &script])
             .status()
             .unwrap();
         assert!(status.success());
         assert!(script.contains("finish-install"));
+        // Validate the authorized source before altering its signature, and
+        // validate the new signature before replacing the installed helper.
+        let digest_check = script.find("test \"$actual\"").unwrap();
+        let sign = script.find("/usr/bin/codesign --force --sign -").unwrap();
+        let verify = script.find("/usr/bin/codesign --verify --strict").unwrap();
+        let replace = script.find("/bin/mv -f").unwrap();
+        assert!(digest_check < sign && sign < verify && verify < replace);
+        assert!(script.ends_with(&format!("'sampleuser' '{}'", "a".repeat(64))));
     }
 }
