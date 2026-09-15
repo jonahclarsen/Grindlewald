@@ -45,6 +45,44 @@ fn tray_icon() -> Image<'static> {
     Image::new_owned(rgba, SIZE as u32, SIZE as u32)
 }
 
+const TRAY_ID: &str = "main";
+
+fn helper_alert_tooltip(status: &privileged::ServiceStatus) -> Option<&'static str> {
+    if !status.installed {
+        None
+    } else if !status.healthy {
+        Some("Grindlewald — Helper repair required")
+    } else if !status.current {
+        Some("Grindlewald — Helper update required")
+    } else {
+        None
+    }
+}
+
+fn refresh_helper_tray(app: &tauri::AppHandle) -> privileged::ServiceStatus {
+    let status = privileged::service_status();
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let tooltip = helper_alert_tooltip(&status);
+        let icon = if tooltip.is_some() {
+            Image::from_bytes(include_bytes!("../icons/helper-alert.png"))
+                .expect("embedded helper alert icon must be a valid PNG")
+        } else {
+            tray_icon()
+        };
+        if let Err(error) = tray.set_icon(Some(icon)) {
+            eprintln!("Could not update the menu bar icon: {error}");
+        }
+        // Replacing an image resets macOS template rendering.
+        if let Err(error) = tray.set_icon_as_template(true) {
+            eprintln!("Could not set the menu bar icon appearance: {error}");
+        }
+        if let Err(error) = tray.set_tooltip(Some(tooltip.unwrap_or("Grindlewald"))) {
+            eprintln!("Could not update the menu bar tooltip: {error}");
+        }
+    }
+    status
+}
+
 #[tauri::command]
 fn get_settings(state: tauri::State<'_, SharedState>) -> Result<Settings, String> {
     state.load_settings()
@@ -88,8 +126,8 @@ async fn test_schedule(id: String, state: tauri::State<'_, SharedState>) -> Resu
 }
 
 #[tauri::command]
-fn privileged_service_status() -> privileged::ServiceStatus {
-    privileged::service_status()
+fn privileged_service_status(app: tauri::AppHandle) -> privileged::ServiceStatus {
+    refresh_helper_tray(&app)
 }
 
 #[tauri::command]
@@ -260,7 +298,7 @@ pub fn run() {
             });
             app.manage(state);
 
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id(TRAY_ID)
                 .icon(tray_icon())
                 .icon_as_template(true)
                 .tooltip("Grindlewald")
@@ -311,6 +349,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            // Check even while the window is hidden or its frontend is still loading.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || refresh_helper_tray(&handle));
             Ok(())
         })
         .on_window_event(|window, event| match event {
