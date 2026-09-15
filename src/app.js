@@ -1,3 +1,4 @@
+import { wifiStatusLabel, wifiStatusMessage } from "./wifi.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "./schedules.js";
 
@@ -30,6 +31,8 @@ const demoSettings = {
 
 let settings;
 let currentWifiSsid = null;
+let currentWifiState = null;
+let wifiRefreshing = 0;
 let wifiRequest = 0;
 const wifiSelections = new Map();
 let discovered = [];
@@ -275,7 +278,7 @@ async function callBackend(command, args = {}) {
       demoEffectActive = ["party", "breathe"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
-    if (command === "current_wifi_ssid") return "Demo Wi-Fi";
+    if (command === "wifi_status") return { state: "connected", ssid: "Demo Wi-Fi" };
     if (command === "get_settings") return structuredClone(demoSettings);
     if (command === "discover_lights") return [
       { name: "Govee H6005", identifier: "local-ble-id-1" },
@@ -341,22 +344,51 @@ function setEffectActive(effect) {
   });
 }
 
-async function refreshWifiSsid() {
+async function refreshWifiSsid(requestPermission = true) {
   const request = ++wifiRequest;
+  wifiRefreshing += 1;
   let ssid = null;
   try {
-    ssid = await call("current_wifi_ssid");
-    if (request === wifiRequest) currentWifiSsid = ssid;
+    const status = await call("wifi_status", { requestPermission });
+    ssid = status.ssid;
+    if (request === wifiRequest) {
+      currentWifiSsid = ssid;
+      currentWifiState = status.state;
+    }
   } catch (error) {
-    if (request === wifiRequest) currentWifiSsid = null;
+    if (request === wifiRequest) {
+      currentWifiSsid = null;
+      currentWifiState = "error";
+    }
     setStatus(String(error), "error");
+  } finally {
+    wifiRefreshing -= 1;
   }
   document.querySelectorAll("[data-wifi-label]").forEach((label) => {
     const schedule = settings.schedules[Number(label.dataset.wifiLabel)];
-    label.textContent = `Turn on if on WiFi: ${schedule.floodlights === "on_wifi" ? schedule.floodlightSsid || "Unavailable" : currentWifiSsid || "Unavailable"}`;
+    label.textContent = `Turn on if on WiFi: ${schedule.floodlights === "on_wifi" ? schedule.floodlightSsid || wifiStatusLabel(currentWifiState) : currentWifiSsid || wifiStatusLabel(currentWifiState)}`;
+  });
+  document.querySelectorAll("[data-wifi-help]").forEach((help) => {
+    help.textContent = wifiStatusMessage(currentWifiState);
+    help.hidden = !help.textContent;
   });
   return ssid;
 }
+
+function refreshVisibleWifi(requestPermission = false) {
+  if (settings && !wifiRefreshing && document.querySelector("#automations-page.active")) {
+    void refreshWifiSsid(requestPermission);
+  }
+}
+
+// Refresh after the system permission dialog or a trip to System Settings.
+window.addEventListener("focus", () => refreshVisibleWifi(true));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshVisibleWifi(true);
+});
+setInterval(() => {
+  if (currentWifiState === "permission_needed") refreshVisibleWifi();
+}, 1000);
 
 function showPage(pageId) {
   if (pageId === "automations-page") void refreshWifiSsid();
@@ -445,7 +477,7 @@ function renderSchedules() {
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
-        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_wifi" data-floodlight-wifi ${floodlightAction === "on_wifi" ? "checked" : ""}><span data-wifi-label="${index}">Turn on if on WiFi: ${escapeHtml((floodlightAction === "on_wifi" ? schedule.floodlightSsid : currentWifiSsid) || "Unavailable")}</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span></div>
+        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_wifi" data-floodlight-wifi ${floodlightAction === "on_wifi" ? "checked" : ""}><span data-wifi-label="${index}">Turn on if on WiFi: ${escapeHtml((floodlightAction === "on_wifi" ? schedule.floodlightSsid : currentWifiSsid) || wifiStatusLabel(currentWifiState))}</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-wifi-help ${wifiStatusMessage(currentWifiState) ? "" : "hidden"}>${escapeHtml(wifiStatusMessage(currentWifiState))}</small></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
@@ -770,7 +802,7 @@ document.addEventListener("click", async (event) => {
   const ssid = await refreshWifiSsid();
   if (wifiSelections.get(schedule.id) !== selection || !settings.schedules.includes(schedule)) return;
   if (!ssid) {
-    setStatus("Could not read the current Wi-Fi SSID. Connect to Wi-Fi and try again.", "error");
+    setStatus(wifiStatusMessage(currentWifiState) || "Could not read the current Wi-Fi SSID. Try again.", "error");
     renderSchedules();
     return;
   }

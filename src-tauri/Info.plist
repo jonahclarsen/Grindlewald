@@ -4,5 +4,11 @@
 <dict>
   <key>NSBluetoothAlwaysUsageDescription</key>
   <string>Grindlewald uses Bluetooth to control your configured Govee lights.</string>
+  <key>NSLocationUsageDescription</key>
+  <string>Grindlewald uses Location permission to read your Wi-Fi network name so floodlight automations can run only on your saved home network.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Grindlewald uses Location permission to read your Wi-Fi network name so floodlight automations can run only on your saved home network.</string>
+  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+  <string>Grindlewald uses Location permission to read your Wi-Fi network name so floodlight automations can run only on your saved home network.</string>
 </dict>
 </plist>

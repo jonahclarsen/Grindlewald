@@ -29,6 +29,11 @@ temporary_executable="$app_path/Contents/MacOS/grindlewald.dev-new"
 /bin/cp "$built_executable" "$temporary_executable"
 /bin/chmod +x "$temporary_executable"
 /bin/mv -f "$temporary_executable" "$executable"
+# Cargo replaces the executable but does not rebuild the installed bundle metadata.
+for key in NSLocationUsageDescription NSLocationWhenInUseUsageDescription NSLocationAlwaysAndWhenInUseUsageDescription; do
+  description="$(/usr/bin/plutil -extract "$key" raw -o - "$script_dir/../src-tauri/Info.plist")"
+  /usr/bin/plutil -replace "$key" -string "$description" "$app_path/Contents/Info.plist"
+done
 sign_dev_app "$app_path"
 
 exec "$executable" "$@"
