@@ -1,3 +1,4 @@
+import { createControlQueue } from "./controls.js";
 import { wifiStatusLabel, wifiStatusMessage } from "./wifi.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "./schedules.js";
@@ -36,8 +37,14 @@ let wifiRefreshing = 0;
 let wifiRequest = 0;
 const wifiSelections = new Map();
 let discovered = [];
-let pendingControl = null;
-let sendingControl = false;
+const controlQueue = createControlQueue(
+  (command) => call("execute_control", { command }),
+  {
+    onStart: () => setStatus("Connecting…", "busy"),
+    onSuccess: (message) => setStatus(message),
+    onError: (error) => setStatus(String(error), "error"),
+  },
+);
 let activeEffect = null;
 let connectionStatus = null;
 let disconnecting = false;
@@ -253,7 +260,7 @@ async function disconnectLights() {
   if (disconnecting) return;
   disconnecting = true;
   controlGeneration += 1;
-  pendingControl = null;
+  controlQueue.clear();
   setEffectActive(null);
   renderConnection();
   try {
@@ -329,25 +336,10 @@ async function save() {
   }
 }
 
-async function queueControl(command) {
+function queueControl(command) {
   if (disconnecting) return;
   setEffectActive(null);
-  pendingControl = command;
-  if (sendingControl) return;
-  sendingControl = true;
-  setStatus("Connecting…", "busy");
-  while (pendingControl) {
-    const generation = controlGeneration;
-    const latest = pendingControl;
-    pendingControl = null;
-    try {
-      const message = await call("execute_control", { command: latest });
-      if (generation === controlGeneration) setStatus(message);
-    } catch (error) {
-      if (generation === controlGeneration) setStatus(String(error), "error");
-    }
-  }
-  sendingControl = false;
+  return controlQueue.enqueue(command);
 }
 
 function setEffectActive(effect) {
