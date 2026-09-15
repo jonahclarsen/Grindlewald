@@ -72,8 +72,8 @@ fn refresh_helper_tray(app: &tauri::AppHandle) -> privileged::ServiceStatus {
         if let Err(error) = tray.set_icon(Some(icon)) {
             eprintln!("Could not update the menu bar icon: {error}");
         }
-        // Replacing an image resets macOS template rendering.
-        if let Err(error) = tray.set_icon_as_template(true) {
+        // Preserve the alert color; let macOS adapt only the normal icon.
+        if let Err(error) = tray.set_icon_as_template(tooltip.is_none()) {
             eprintln!("Could not set the menu bar icon appearance: {error}");
         }
         if let Err(error) = tray.set_tooltip(Some(tooltip.unwrap_or("Grindlewald"))) {
