@@ -43,6 +43,8 @@ let connectionStatus = null;
 let disconnecting = false;
 let controlGeneration = 0;
 let controlsInFlight = 0;
+let connectionBusyTimer = null;
+let connectionBusyVisible = false;
 let refreshingConnection = false;
 let demoConnectedUntil = 0;
 let demoEffectActive = false;
@@ -200,14 +202,28 @@ function renderConnection() {
   const busy = controlsInFlight > 0 || (connectionStatus && (
     connectionStatus.connectedCount === null || (connectionStatus.effectActive && !connected)
   ));
-  $("#connection-control").classList.toggle("connected", connected && !disconnecting);
-  $("#connection-control").classList.toggle("busy", Boolean(disconnecting || busy));
+  if (!busy || disconnecting) {
+    clearTimeout(connectionBusyTimer);
+    connectionBusyTimer = null;
+    connectionBusyVisible = false;
+  } else if (connectionBusyTimer === null && !connectionBusyVisible) {
+    connectionBusyTimer = setTimeout(() => {
+      connectionBusyTimer = null;
+      connectionBusyVisible = true;
+      renderConnection();
+    }, 200);
+  }
+  // Keep the previous status during quick updates, including its visual styling.
+  if (!busy || connectionBusyVisible || disconnecting) {
+    $("#connection-control").classList.toggle("connected", connected && !disconnecting);
+    $("#connection-control").classList.toggle("busy", Boolean(disconnecting || busy));
+    $("#connection-label").textContent = disconnecting ? "Disconnecting…"
+      : busy ? "Connecting / updating"
+      : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""}`
+      : connectionStatus ? "Disconnected" : "Status unavailable";
+  }
   button.disabled = disconnecting || (connectionStatus !== null && !connected && !busy);
   button.setAttribute("aria-busy", String(disconnecting));
-  $("#connection-label").textContent = disconnecting ? "Disconnecting…"
-    : busy ? "Connecting / updating"
-    : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""}`
-    : connectionStatus ? "Disconnected" : "Status unavailable";
   button.textContent = disconnecting ? "Closing…" : "Disconnect";
   button.title = connected
     ? "Keeping the Bluetooth connection open. Click to disconnect and stop effects."
@@ -259,6 +275,7 @@ async function call(command, args = {}) {
     return await callBackend(command, args);
   } finally {
     controlsInFlight -= 1;
+    renderConnection();
     await refreshConnection();
   }
 }
