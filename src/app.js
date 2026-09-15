@@ -180,10 +180,23 @@ function makeDraggable(track, update) {
   });
 }
 
+let statusTimer = null;
+
 function setStatus(message, kind = "ready") {
-  $("#status").textContent = kind === "error" ? summarizeError(message) : message;
-  $("#status-dot").className = kind === "ready" ? "" : kind;
-  if (kind === "error") showError(message);
+  clearTimeout(statusTimer);
+  statusTimer = null;
+  const renderStatus = () => {
+    statusTimer = null;
+    $("#status").textContent = kind === "error" ? summarizeError(message) : message;
+    $("#status-dot").className = kind === "ready" ? "" : kind;
+  };
+  if (kind === "error") {
+    renderStatus();
+    showError(message);
+  } else {
+    // Coalesce quick progress, save, and update messages into the latest status.
+    statusTimer = setTimeout(renderStatus, 200);
+  }
 }
 
 function setDiscoveryBusy(isBusy) {
