@@ -5,7 +5,7 @@ pub mod privileged;
 pub mod protocol;
 pub mod settings;
 pub mod state;
-mod wifi;
+mod network;
 
 use std::{env, path::PathBuf};
 
@@ -337,7 +337,7 @@ pub fn run() {
             revoke_privileged_job,
             uninstall_privileged_service,
             set_floodlights,
-            wifi::wifi_status,
+            network::home_network_status,
             copy_error_details,
             hide_window,
             quit_app,

@@ -29,10 +29,11 @@ temporary_executable="$app_path/Contents/MacOS/grindlewald.dev-new"
 /bin/cp "$built_executable" "$temporary_executable"
 /bin/chmod +x "$temporary_executable"
 /bin/mv -f "$temporary_executable" "$executable"
-# Cargo replaces the executable but does not rebuild the installed bundle metadata.
+# Remove permission descriptions left in installed bundles by the old SSID lookup.
 for key in NSLocationUsageDescription NSLocationWhenInUseUsageDescription NSLocationAlwaysAndWhenInUseUsageDescription; do
-  description="$(/usr/bin/plutil -extract "$key" raw -o - "$script_dir/../src-tauri/Info.plist")"
-  /usr/bin/plutil -replace "$key" -string "$description" "$app_path/Contents/Info.plist"
+  if /usr/bin/plutil -extract "$key" raw -o /dev/null "$app_path/Contents/Info.plist" 2>/dev/null; then
+    /usr/bin/plutil -remove "$key" "$app_path/Contents/Info.plist"
+  fi
 done
 sign_dev_app "$app_path"
 

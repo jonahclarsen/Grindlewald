@@ -174,8 +174,7 @@ button { cursor: pointer; }
 .check-pill input { margin: 0 4px 0 0; accent-color: var(--purple); }
 .radio-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .radio-pill { display: flex; align-items: center; justify-content: center; padding: 7px 5px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.045); color: var(--muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
-.radio-pill:has([data-floodlight-wifi]) { grid-column: 1 / -1; white-space: normal; }
-[data-wifi-label] { min-width: 0; overflow-wrap: anywhere; }
+.radio-pill:has([data-floodlight-network]) { grid-column: 1 / -1; white-space: normal; }
 .radio-pill:has(input:checked) { border-color: rgba(164,129,239,.7); background: rgba(142,114,232,.2); color: var(--ink); }
 .radio-pill input { margin: 0 5px 0 0; accent-color: var(--purple); }
 .warning { color: #dbba7a; background: rgba(220, 171, 75, .08); border-radius: 8px; padding: 8px; font-size: 10px; line-height: 1.35; }

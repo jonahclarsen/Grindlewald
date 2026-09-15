@@ -20,7 +20,6 @@ name = "grindlewaldctl"
 path = "src/bin/grindlewaldctl.rs"
 
 [build-dependencies]
-cc = "1.4"
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]

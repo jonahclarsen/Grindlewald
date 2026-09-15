@@ -1,5 +1,5 @@
 import { createControlQueue } from "./controls.js";
-import { wifiStatusLabel, wifiStatusMessage } from "./wifi.js";
+import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "./schedules.js";
 
@@ -31,11 +31,11 @@ const demoSettings = {
 };
 
 let settings;
-let currentWifiSsid = null;
-let currentWifiState = null;
-let wifiRefreshing = 0;
-let wifiRequest = 0;
-const wifiSelections = new Map();
+let currentHomeNetwork = null;
+let currentNetworkState = "loading";
+let networkRefreshing = 0;
+let networkRequest = 0;
+const networkSelections = new Map();
 let discovered = [];
 const controlQueue = createControlQueue(
   (command) => call("execute_control", { command }),
@@ -315,7 +315,7 @@ async function callBackend(command, args = {}) {
       demoEffectActive = ["party", "breathe"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
-    if (command === "wifi_status") return { state: "connected", ssid: "Demo Wi-Fi" };
+    if (command === "home_network_status") return { fingerprint: "router-sha256:" + "0".repeat(64) };
     if (command === "get_settings") return structuredClone(demoSettings);
     if (command === "discover_lights") return [
       { name: "Govee H6005", identifier: "local-ble-id-1" },
@@ -366,54 +366,46 @@ function setEffectActive(effect) {
   });
 }
 
-async function refreshWifiSsid(requestPermission = true) {
-  const request = ++wifiRequest;
-  wifiRefreshing += 1;
-  let ssid = null;
+async function refreshHomeNetwork() {
+  const request = ++networkRequest;
+  networkRefreshing += 1;
+  let fingerprint = null;
   try {
-    const status = await call("wifi_status", { requestPermission });
-    ssid = status.ssid;
-    if (request === wifiRequest) {
-      currentWifiSsid = ssid;
-      currentWifiState = status.state;
+    const status = await call("home_network_status");
+    fingerprint = status.fingerprint;
+    if (request === networkRequest) {
+      currentHomeNetwork = fingerprint;
+      currentNetworkState = "ready";
     }
   } catch (error) {
-    if (request === wifiRequest) {
-      currentWifiSsid = null;
-      currentWifiState = "error";
+    if (request === networkRequest) {
+      currentHomeNetwork = null;
+      currentNetworkState = "error";
     }
     setStatus(String(error), "error");
   } finally {
-    wifiRefreshing -= 1;
+    networkRefreshing -= 1;
   }
-  document.querySelectorAll("[data-wifi-label]").forEach((label) => {
-    const schedule = settings.schedules[Number(label.dataset.wifiLabel)];
-    label.textContent = `Turn on if on WiFi: ${schedule.floodlights === "on_wifi" ? schedule.floodlightSsid || wifiStatusLabel(currentWifiState) : currentWifiSsid || wifiStatusLabel(currentWifiState)}`;
+  document.querySelectorAll("[data-network-help]").forEach((help) => {
+    const schedule = settings.schedules[Number(help.closest("[data-schedule-index]").dataset.scheduleIndex)];
+    help.textContent = homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState);
   });
-  document.querySelectorAll("[data-wifi-help]").forEach((help) => {
-    help.textContent = wifiStatusMessage(currentWifiState);
-    help.hidden = !help.textContent;
-  });
-  return ssid;
+  return fingerprint;
 }
 
-function refreshVisibleWifi(requestPermission = false) {
-  if (settings && !wifiRefreshing && document.querySelector("#automations-page.active")) {
-    void refreshWifiSsid(requestPermission);
+function refreshVisibleNetwork() {
+  if (settings && !networkRefreshing && document.querySelector("#automations-page.active")) {
+    void refreshHomeNetwork();
   }
 }
 
-// Refresh after the system permission dialog or a trip to System Settings.
-window.addEventListener("focus", () => refreshVisibleWifi(true));
+window.addEventListener("focus", refreshVisibleNetwork);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshVisibleWifi(true);
+  if (!document.hidden) refreshVisibleNetwork();
 });
-setInterval(() => {
-  if (currentWifiState === "permission_needed") refreshVisibleWifi();
-}, 1000);
 
 function showPage(pageId) {
-  if (pageId === "automations-page") void refreshWifiSsid();
+  if (pageId === "automations-page") void refreshHomeNetwork();
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === pageId));
 }
@@ -499,7 +491,7 @@ function renderSchedules() {
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
-        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_wifi" data-floodlight-wifi ${floodlightAction === "on_wifi" ? "checked" : ""}><span data-wifi-label="${index}">Turn on if on WiFi: ${escapeHtml((floodlightAction === "on_wifi" ? schedule.floodlightSsid : currentWifiSsid) || wifiStatusLabel(currentWifiState))}</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-wifi-help ${wifiStatusMessage(currentWifiState) ? "" : "hidden"}>${escapeHtml(wifiStatusMessage(currentWifiState))}</small></div>
+        <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_home_network" data-floodlight-network ${floodlightAction === "on_home_network" ? "checked" : ""}><span>Turn on if on home network</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-network-help>${escapeHtml(homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState))}</small></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
@@ -813,23 +805,23 @@ document.addEventListener("focusout", (event) => {
   event.target.parentElement.querySelector("[data-edit-schedule-name]").hidden = false;
 });
 
-// A click also fires when the radio is already selected, allowing SSID recapture.
+// A click also fires when the radio is already selected, allowing the home network to be saved again.
 document.addEventListener("click", async (event) => {
-  if (!event.target.matches("[data-floodlight-wifi]")) return;
+  if (!event.target.matches("[data-floodlight-network]")) return;
   const card = event.target.closest("[data-schedule-index]");
   const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
   const previous = structuredClone(schedule);
   const selection = Symbol();
-  wifiSelections.set(schedule.id, selection);
-  const ssid = await refreshWifiSsid();
-  if (wifiSelections.get(schedule.id) !== selection || !settings.schedules.includes(schedule)) return;
-  if (!ssid) {
-    setStatus(wifiStatusMessage(currentWifiState) || "Could not read the current Wi-Fi SSID. Try again.", "error");
+  networkSelections.set(schedule.id, selection);
+  const fingerprint = await refreshHomeNetwork();
+  if (networkSelections.get(schedule.id) !== selection || !settings.schedules.includes(schedule)) return;
+  if (!fingerprint) {
+    setStatus(homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState), "error");
     renderSchedules();
     return;
   }
-  schedule.floodlights = "on_wifi";
-  schedule.floodlightSsid = ssid;
+  schedule.floodlights = "on_home_network";
+  schedule.floodlightNetwork = fingerprint;
   if (!await save()) Object.assign(schedule, previous);
   renderSchedules();
 });
@@ -871,9 +863,9 @@ document.addEventListener("change", async (event) => {
       schedule[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
       if (field === "enabled") schedule.disabledUntil = null;
       if (field === "floodlights") {
-        wifiSelections.delete(schedule.id);
-        schedule.floodlightSsid = null;
-        await refreshWifiSsid();
+        networkSelections.delete(schedule.id);
+        schedule.floodlightNetwork = null;
+        await refreshHomeNetwork();
       }
     }
     if (event.target.dataset.scheduleLight) {
@@ -997,8 +989,8 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
-  const ssid = await refreshWifiSsid();
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "on_wifi", floodlightSsid: ssid, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  const fingerprint = await refreshHomeNetwork();
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "on_home_network", floodlightNetwork: fingerprint, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
