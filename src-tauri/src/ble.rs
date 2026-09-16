@@ -26,6 +26,7 @@ pub struct DiscoveredDevice {
 pub struct BleController {
     adapter: Option<Adapter>,
     connections: HashMap<String, Peripheral>,
+    light_states: HashMap<String, LightState>,
 }
 
 impl Default for BleController {
@@ -39,6 +40,7 @@ impl BleController {
         Self {
             adapter: None,
             connections: HashMap::new(),
+            light_states: HashMap::new(),
         }
     }
 
@@ -123,7 +125,9 @@ impl BleController {
 
         let writes = selected.iter().map(|device| {
             let peripheral = self.connections[&normalize(&device.identifier)].clone();
-            let frames = frames_for(command, device.profile);
+            let key = normalize(&device.identifier);
+            let mut next_state = self.light_states.get(&key).cloned().unwrap_or_default();
+            let frames = next_state.frames(settings, command, device.profile);
             async move {
                 let characteristic = peripheral
                     .characteristics()
@@ -142,7 +146,7 @@ impl BleController {
                         .await
                         .map_err(|error| format!("{}: {error}", device.name))?;
                 }
-                Ok::<_, String>(device.name.clone())
+                Ok::<_, String>((device.name.clone(), key, next_state))
             }
         });
 
@@ -151,7 +155,10 @@ impl BleController {
         let mut errors = Vec::new();
         for result in results {
             match result {
-                Ok(name) => changed.push(name),
+                Ok((name, key, state)) => {
+                    self.light_states.insert(key, state);
+                    changed.push(name);
+                }
                 Err(error) => errors.push(error),
             }
         }
@@ -173,6 +180,10 @@ impl BleController {
             };
             if !connected {
                 self.connections.remove(&connection_key);
+                self.light_states
+                    .entry(connection_key.clone())
+                    .or_default()
+                    .needs_sync = true;
                 missing.push(device.clone());
             }
         }
@@ -268,6 +279,7 @@ impl BleController {
         for (identifier, released) in results {
             if released {
                 self.connections.remove(&identifier);
+                self.light_states.entry(identifier).or_default().needs_sync = true;
             }
         }
         if self.connections.is_empty() {
@@ -296,6 +308,64 @@ impl BleController {
                     .await;
             }
         }
+    }
+}
+
+// Desired values survive disconnects; synchronization is scoped to each BLE link.
+#[derive(Clone)]
+struct LightState {
+    color: Option<[u8; 20]>,
+    brightness: Option<f32>,
+    needs_sync: bool,
+}
+
+impl Default for LightState {
+    fn default() -> Self {
+        Self {
+            color: None,
+            brightness: None,
+            needs_sync: true,
+        }
+    }
+}
+
+impl LightState {
+    fn frames(
+        &mut self,
+        settings: &Settings,
+        command: &ControlCommand,
+        profile: crate::protocol::DeviceProfile,
+    ) -> Result<Vec<[u8; 20]>, String> {
+        let mut frames = frames_for(command, profile)?;
+        match command {
+            ControlCommand::Color { brightness, .. } | ControlCommand::White { brightness, .. } => {
+                let desired = brightness
+                    .or(self.brightness)
+                    .unwrap_or(settings.brightness);
+                frames.truncate(1);
+                if self.needs_sync || brightness.is_some_and(|value| Some(value) != self.brightness)
+                {
+                    frames.push(brightness_frame(desired)?);
+                }
+                self.color = Some(frames[0]);
+                self.brightness = Some(desired);
+                self.needs_sync = false;
+            }
+            ControlCommand::Brightness { value, .. } => {
+                if self.needs_sync {
+                    let color = match self.color {
+                        Some(color) => color,
+                        None => color_frame(profile, parse_hex_color(&settings.color)?),
+                    };
+                    frames.insert(0, color);
+                    self.color = Some(color);
+                }
+                self.brightness = Some(*value);
+                self.needs_sync = false;
+            }
+            _ => {}
+        }
+        Ok(frames)
     }
 }
 
@@ -374,7 +444,131 @@ fn frames_for(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize;
+    use super::*;
+    use crate::protocol::DeviceProfile;
+
+    #[test]
+    fn reconnect_syncs_both_once_for_color_and_white_on_each_profile() {
+        for profile in [DeviceProfile::Classic, DeviceProfile::H6005] {
+            for command in [
+                ControlCommand::Color {
+                    value: "#123456".into(),
+                    brightness: Some(0.0),
+                    device: None,
+                },
+                ControlCommand::White {
+                    value: "#ffccaa".into(),
+                    kelvin: Some(2700),
+                    brightness: Some(0.0),
+                    device: None,
+                },
+            ] {
+                let settings = Settings::default();
+                let mut state = LightState::default();
+                let expected = frames_for(&command, profile).unwrap();
+                assert_eq!(
+                    state.frames(&settings, &command, profile).unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    state.frames(&settings, &command, profile).unwrap(),
+                    expected[..1]
+                );
+                state.needs_sync = true;
+                let brightness = ControlCommand::Brightness {
+                    value: 0.7,
+                    device: None,
+                };
+                assert_eq!(
+                    state.frames(&settings, &brightness, profile).unwrap(),
+                    vec![expected[0], brightness_frame(0.7).unwrap()]
+                );
+                assert_eq!(
+                    state.frames(&settings, &brightness, profile).unwrap(),
+                    vec![brightness_frame(0.7).unwrap()]
+                );
+                // An explicitly changed brightness (including presets/queued edits) must still apply.
+                assert_eq!(
+                    state.frames(&settings, &command, profile).unwrap(),
+                    expected
+                );
+                state.needs_sync = true;
+                assert_eq!(
+                    state.frames(&settings, &command, profile).unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn first_brightness_uses_saved_color_and_power_does_not_consume_sync() {
+        let settings = Settings::default();
+        let profile = DeviceProfile::Classic;
+        let mut state = LightState::default();
+        state
+            .frames(
+                &settings,
+                &ControlCommand::Power {
+                    on: true,
+                    device: None,
+                },
+                profile,
+            )
+            .unwrap();
+        let command = ControlCommand::Brightness {
+            value: 0.2,
+            device: None,
+        };
+        assert_eq!(
+            state.frames(&settings, &command, profile).unwrap(),
+            vec![
+                color_frame(profile, parse_hex_color(&settings.color).unwrap()),
+                brightness_frame(0.2).unwrap()
+            ]
+        );
+        let mut other_light = LightState::default();
+        assert_eq!(
+            other_light
+                .frames(&settings, &command, profile)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(state.frames(&settings, &command, profile).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn color_without_brightness_restores_last_brightness_after_reconnect() {
+        let settings = Settings::default();
+        let profile = DeviceProfile::Classic;
+        let mut state = LightState::default();
+        let command = ControlCommand::Color {
+            value: "#abcdef".into(),
+            brightness: None,
+            device: None,
+        };
+        assert_eq!(
+            state.frames(&settings, &command, profile).unwrap()[1],
+            brightness_frame(settings.brightness).unwrap()
+        );
+        state
+            .frames(
+                &settings,
+                &ControlCommand::Brightness {
+                    value: 0.1,
+                    device: None,
+                },
+                profile,
+            )
+            .unwrap();
+        assert_eq!(state.frames(&settings, &command, profile).unwrap().len(), 1);
+        state.needs_sync = true;
+        assert_eq!(
+            state.frames(&settings, &command, profile).unwrap()[1],
+            brightness_frame(0.1).unwrap()
+        );
+    }
 
     #[test]
     fn bluetooth_identifiers_are_matched_case_insensitively() {
