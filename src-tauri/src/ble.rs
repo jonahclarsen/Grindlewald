@@ -1,10 +1,10 @@
 use std::{collections::HashMap, time::Duration};
 
 use btleplug::{
-    api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType},
+    api::{Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter, WriteType},
     platform::{Adapter, Manager, Peripheral},
 };
-use futures::future::join_all;
+use futures::{Stream, StreamExt, future::join_all};
 use uuid::Uuid;
 
 use crate::{
@@ -192,24 +192,41 @@ impl BleController {
         }
 
         let adapter = self.adapter().await?;
+        // Subscribe before scanning so even the first advertisement is observed.
+        // btleplug's macOS backend discards its native peripheral on disconnect;
+        // a cached adapter.peripherals() entry alone is not safe to reconnect.
+        let events = adapter.events().await.map_err(|error| error.to_string())?;
         adapter
             .start_scan(ScanFilter::default())
             .await
             .map_err(|error| error.to_string())?;
-        tokio::time::sleep(Duration::from_millis(1400)).await;
-        let peripherals = adapter
-            .peripherals()
-            .await
-            .map_err(|error| error.to_string())?;
-        let _ = adapter.stop_scan().await;
-
-        let mut targets = Vec::new();
-        for device in missing {
-            let peripheral = find_peripheral(&peripherals, &device)
+        let observations = events.filter_map(|event| async {
+            let id = match event {
+                CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) => id,
+                _ => return None,
+            };
+            let peripheral = match adapter.peripheral(&id).await {
+                Ok(peripheral) => peripheral,
+                Err(error) => return Some(Err(error.to_string())),
+            };
+            let name = peripheral
+                .properties()
                 .await
-                .ok_or_else(|| format!("could not find {} over Bluetooth", device.name))?;
-            targets.push((device, peripheral));
-        }
+                .ok()
+                .flatten()
+                .and_then(|properties| properties.local_name);
+            Some(Ok(ScanObservation {
+                peripheral,
+                identifier: id.to_string(),
+                name,
+            }))
+        });
+        let targets = scan_targets(&missing, observations, Duration::from_millis(1400)).await;
+        // Stop on success, timeout, or error. Explicit cancellation stops scanning
+        // through disconnect_all, including while scan_targets is awaiting an event.
+        let stop_result = adapter.stop_scan().await.map_err(|error| error.to_string());
+        let targets = targets?;
+        stop_result?;
         // Track attempts before awaiting connect so cancellation can release every link.
         for (device, peripheral) in &targets {
             self.connections
@@ -369,22 +386,51 @@ impl LightState {
     }
 }
 
-async fn find_peripheral(peripherals: &[Peripheral], device: &DeviceConfig) -> Option<Peripheral> {
-    let wanted = normalize(&device.identifier);
-    for peripheral in peripherals {
-        if normalize(&peripheral.id().to_string()) == wanted {
-            return Some(peripheral.clone());
-        }
-        if let Ok(Some(properties)) = peripheral.properties().await
-            && properties
-                .local_name
-                .as_deref()
-                .is_some_and(|name| name.eq_ignore_ascii_case(&device.identifier))
-        {
-            return Some(peripheral.clone());
-        }
+struct ScanObservation<P> {
+    peripheral: P,
+    identifier: String,
+    name: Option<String>,
+}
+
+// Only fresh scan events feed this collector, never stale cached peripherals.
+async fn scan_targets<P: Clone>(
+    devices: &[DeviceConfig],
+    observations: impl Stream<Item = Result<ScanObservation<P>, String>>,
+    scan_window: Duration,
+) -> Result<Vec<(DeviceConfig, P)>, String> {
+    futures::pin_mut!(observations);
+    let deadline = tokio::time::Instant::now() + scan_window;
+    let mut targets = Vec::new();
+    let mut missing = devices.to_vec();
+    while !missing.is_empty() {
+        let observation = match tokio::time::timeout_at(deadline, observations.next()).await {
+            Ok(Some(observation)) => observation?,
+            Ok(None) | Err(_) => break,
+        };
+        missing.retain(|device| {
+            let matches = normalize(&observation.identifier) == normalize(&device.identifier)
+                || observation
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&device.identifier));
+            if matches {
+                targets.push((device.clone(), observation.peripheral.clone()));
+            }
+            !matches
+        });
     }
-    None
+    if missing.is_empty() {
+        Ok(targets)
+    } else {
+        Err(format!(
+            "could not find {} over Bluetooth",
+            missing
+                .iter()
+                .map(|device| device.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
 }
 
 fn normalize(value: &str) -> String {
@@ -446,6 +492,108 @@ fn frames_for(
 mod tests {
     use super::*;
     use crate::protocol::DeviceProfile;
+
+    fn scan_device(name: &str, identifier: &str) -> DeviceConfig {
+        DeviceConfig {
+            name: name.into(),
+            identifier: identifier.into(),
+            profile: DeviceProfile::H6005,
+            enabled: true,
+        }
+    }
+
+    fn observation(identifier: &str, name: Option<&str>) -> Result<ScanObservation<usize>, String> {
+        Ok(ScanObservation {
+            peripheral: 1,
+            identifier: identifier.into(),
+            name: name.map(str::to_owned),
+        })
+    }
+
+    #[tokio::test]
+    async fn reconnect_discovery_returns_immediately_after_requested_advertisement() {
+        // A stream that stays open catches regressions that wait out the scan
+        // window or wait for a second event after finding the light.
+        let observations = futures::stream::iter([observation("aa11-bb22", None)])
+            .chain(futures::stream::pending());
+        let devices = [scan_device("Desk", "AA11-BB22")];
+        let targets = tokio::time::timeout(
+            Duration::from_millis(100),
+            scan_targets(&devices, observations, Duration::from_millis(1400)),
+        )
+        .await
+        .expect("discovery must not wait out the 1.4-second window")
+        .unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].0, devices[0]);
+    }
+
+    #[tokio::test]
+    async fn reconnect_discovery_waits_for_all_targets_and_ignores_unrelated_or_repeated_events() {
+        let observations = futures::stream::iter([
+            observation("other", None),
+            observation("aa11", None),
+            observation("AA11", None),
+            observation("bb22", Some("named-light")),
+        ])
+        .chain(futures::stream::pending());
+        let devices = [
+            scan_device("Desk", "AA11"),
+            scan_device("Shelf", "Named-Light"),
+        ];
+        let targets = tokio::time::timeout(
+            Duration::from_millis(100),
+            scan_targets(&devices, observations, Duration::from_millis(1400)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].0, devices[0]);
+        assert_eq!(targets[1].0, devices[1]);
+    }
+
+    #[tokio::test]
+    async fn reconnect_discovery_times_out_and_reports_only_missing_lights() {
+        let observations =
+            futures::stream::iter([observation("aa11", None)]).chain(futures::stream::pending());
+        let error = tokio::time::timeout(
+            Duration::from_millis(200),
+            scan_targets(
+                &[scan_device("Desk", "AA11"), scan_device("Shelf", "BB22")],
+                observations,
+                Duration::from_millis(20),
+            ),
+        )
+        .await
+        .expect("missing lights must not leave discovery running indefinitely")
+        .unwrap_err();
+        assert_eq!(error, "could not find Shelf over Bluetooth");
+    }
+
+    #[tokio::test]
+    async fn reconnect_discovery_propagates_errors_and_handles_a_closed_stream() {
+        let devices = [scan_device("Desk", "AA11")];
+        let observations = futures::stream::iter([Err::<ScanObservation<usize>, _>(
+            "Bluetooth unavailable".to_owned(),
+        )]);
+        assert_eq!(
+            scan_targets(&devices, observations, Duration::from_millis(1400))
+                .await
+                .unwrap_err(),
+            "Bluetooth unavailable"
+        );
+        assert_eq!(
+            scan_targets::<usize>(
+                &devices,
+                futures::stream::empty(),
+                Duration::from_millis(1400)
+            )
+            .await
+            .unwrap_err(),
+            "could not find Desk over Bluetooth"
+        );
+    }
 
     #[test]
     fn reconnect_syncs_both_once_for_color_and_white_on_each_profile() {
