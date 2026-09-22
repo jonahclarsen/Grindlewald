@@ -7,3 +7,9 @@ export function formatCycleSeconds(seconds) {
   const remainder = seconds % 60;
   return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
 }
+
+export function cycleSecondsAfterStepChange(seconds, previousStep, nextStep) {
+  const previousMinimum = minimumCycleSeconds(previousStep);
+  const nextMinimum = minimumCycleSeconds(nextStep);
+  return seconds <= previousMinimum ? nextMinimum : Math.max(seconds, nextMinimum);
+}

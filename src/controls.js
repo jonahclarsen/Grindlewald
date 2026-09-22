@@ -20,7 +20,8 @@ export function createControlQueue(send, { onStart, onSuccess, onError } = {}) {
           pending.pop();
         } else if (
           (isColor(command) && (isColor(previous) || previous.command === "brightness")) ||
-          (command.command === "brightness" && previous.command === "brightness")
+          (command.command === "brightness" && previous.command === "brightness") ||
+          (command.command === "seek_breathing" && previous.command === "seek_breathing")
         ) {
           if (isColor(command) && command.brightness == null) {
             command = { ...command, brightness: previous.command === "brightness" ? previous.value : previous.brightness };

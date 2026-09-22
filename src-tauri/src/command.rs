@@ -33,7 +33,7 @@ pub enum ControlCommand {
     Breathe {
         #[serde(default)]
         cycle_seconds: Option<u32>,
-        // Legacy clients express duration per frame; still enforce the 300 ms floor.
+        // Legacy clients express average duration per frame; preserve cycle bounds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pace_seconds: Option<f32>,
         #[serde(default = "crate::breathing::default_color_step")]
@@ -42,6 +42,11 @@ pub enum ControlCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hue_step_degrees: Option<f32>,
         device: Option<String>,
+    },
+    SeekBreathing {
+        position: u16,
+        #[serde(default)]
+        request_id: u64,
     },
     StopParty,
     StopEffect,
@@ -52,6 +57,8 @@ pub enum ControlCommand {
     },
     BreathingFrame {
         value: String,
+        #[serde(default)]
+        brightness: Option<f32>,
         device: Option<String>,
     },
     Experiment {
@@ -73,7 +80,7 @@ impl ControlCommand {
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
             | Self::Experiment { device, .. } => device.as_deref(),
-            Self::StopParty | Self::StopEffect => None,
+            Self::SeekBreathing { .. } | Self::StopParty | Self::StopEffect => None,
         }
     }
 }

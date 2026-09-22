@@ -4,7 +4,8 @@ use std::time::Duration;
 pub const COLOR_COUNT: u16 = 6 * 255;
 
 pub const MAX_COLOR_STEP: u16 = 100;
-pub const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(300);
+// Retained as the UI minimum average pace, not a per-frame rate limiter.
+pub const MIN_AVERAGE_INTERVAL: Duration = Duration::from_millis(300);
 pub const MAX_CYCLE_SECONDS: u32 = 3600;
 
 pub fn default_color_step() -> u16 {
@@ -23,7 +24,7 @@ pub fn minimum_cycle_seconds(color_step: u16) -> u32 {
     (u32::from(frames_per_cycle(color_step)) * 300).div_ceil(1000)
 }
 
-pub fn frame_interval(cycle_seconds: u32, color_step: u16) -> Result<Duration, String> {
+pub fn average_frame_interval(cycle_seconds: u32, color_step: u16) -> Result<Duration, String> {
     validate_color_step(color_step)?;
     let minimum = minimum_cycle_seconds(color_step);
     if !(minimum..=MAX_CYCLE_SECONDS).contains(&cycle_seconds) {
@@ -33,7 +34,7 @@ pub fn frame_interval(cycle_seconds: u32, color_step: u16) -> Result<Duration, S
     }
     Ok(
         Duration::from_secs_f64(f64::from(cycle_seconds) / f64::from(frames_per_cycle(color_step)))
-            .max(MIN_FRAME_INTERVAL),
+            .max(MIN_AVERAGE_INTERVAL),
     )
 }
 
@@ -61,17 +62,17 @@ pub fn resolve_cycle_seconds(
         (None, Some(pace)) => cycle_from_legacy_pace(pace, color_step)?,
         (None, None) => default_cycle_seconds(),
     };
-    frame_interval(cycle, color_step)?;
+    average_frame_interval(cycle, color_step)?;
     Ok(cycle)
 }
 
-// Account for write time without catching up in bursts after a slow Bluetooth operation.
+// Rebase after a slow write instead of accumulating overdue frame deadlines.
 pub fn next_frame_deadline(
     started: tokio::time::Instant,
     finished: tokio::time::Instant,
     interval: Duration,
 ) -> tokio::time::Instant {
-    (started + interval).max(finished + MIN_FRAME_INTERVAL)
+    (started + interval).max(finished)
 }
 
 // Close every lap exactly, even when the requested step does not divide 1,530.
@@ -116,18 +117,78 @@ pub fn color_step_from_degrees(degrees: f32) -> Result<u16, String> {
         .clamp(1.0, f32::from(MAX_COLOR_STEP)) as u16)
 }
 
-pub fn color_at_position(position: u16) -> String {
+pub fn rgb_at_position(position: u16) -> [u8; 3] {
     let position = position % COLOR_COUNT;
     let offset = (position % 255) as u8;
-    let [red, green, blue] = match position / 255 {
+    match position / 255 {
         0 => [255, offset, 0],
         1 => [255 - offset, 255, 0],
         2 => [0, 255, offset],
         3 => [0, 255 - offset, 255],
         4 => [offset, 0, 255],
         _ => [255, 0, 255 - offset],
-    };
+    }
+}
+
+pub fn color_at_position(position: u16) -> String {
+    let [red, green, blue] = rgb_at_position(position);
     format!("#{red:02x}{green:02x}{blue:02x}")
+}
+
+#[derive(Debug, Clone)]
+pub struct PerceptualFrame {
+    pub position: u16,
+    pub brightness: u8,
+    // Time from this frame to the following frame, including the closing edge.
+    pub interval: Duration,
+}
+
+pub struct PerceptualCycle {
+    pub frames: Vec<PerceptualFrame>,
+}
+
+impl PerceptualCycle {
+    pub fn new(
+        origin: u16,
+        color_step: u16,
+        cycle_seconds: u32,
+        base_brightness: f32,
+    ) -> Result<Self, String> {
+        average_frame_interval(cycle_seconds, color_step)?;
+        let base = crate::protocol::brightness_frame(base_brightness)?[2];
+        let mut cycle = ColorCycle::new(origin, color_step)?;
+        let mut position = origin % COLOR_COUNT;
+        let mut frames = Vec::with_capacity(usize::from(frames_per_cycle(color_step)));
+        for _ in 0..frames_per_cycle(color_step) {
+            frames.push(PerceptualFrame {
+                position,
+                brightness: crate::perceptual::boosted_brightness(rgb_at_position(position), base),
+                interval: Duration::ZERO,
+            });
+            position = cycle.advance();
+        }
+        let labs: Vec<_> = frames
+            .iter()
+            .map(|frame| {
+                // An all-black cycle has no perceptual distance. Use the full-output
+                // hue path for timing when brightness is zero, while still sending zero.
+                let brightness = if base == 0 {
+                    1.0
+                } else {
+                    f64::from(frame.brightness) / 255.0
+                };
+                crate::perceptual::oklab(rgb_at_position(frame.position), brightness)
+            })
+            .collect();
+        let distances: Vec<_> = (0..frames.len())
+            .map(|index| crate::perceptual::distance(labs[index], labs[(index + 1) % labs.len()]))
+            .collect();
+        let total: f64 = distances.iter().sum();
+        for (frame, distance) in frames.iter_mut().zip(distances) {
+            frame.interval = Duration::from_secs_f64(f64::from(cycle_seconds) * distance / total);
+        }
+        Ok(Self { frames })
+    }
 }
 
 #[cfg(test)]
@@ -135,6 +196,53 @@ mod tests {
     use super::*;
     use crate::protocol::parse_hex_color;
     use std::collections::HashSet;
+
+    #[test]
+    fn weighted_cycles_preserve_duration_order_and_brightness_limits() {
+        for step in 1..=MAX_COLOR_STEP {
+            for base in [0.0, 0.01, 0.1, 0.4, 1.0] {
+                let seconds = minimum_cycle_seconds(step);
+                let plan = PerceptualCycle::new(1529, step, seconds, base).unwrap();
+                assert_eq!(plan.frames.len(), usize::from(frames_per_cycle(step)));
+                assert_eq!(plan.frames[0].position, 1529);
+                let total: f64 = plan
+                    .frames
+                    .iter()
+                    .map(|frame| frame.interval.as_secs_f64())
+                    .sum();
+                assert!((total - f64::from(seconds)).abs() < 0.00001);
+                let mut expected = ColorCycle::new(1529, step).unwrap();
+                for (index, frame) in plan.frames.iter().enumerate() {
+                    if index > 0 {
+                        assert_eq!(frame.position, expected.advance());
+                    }
+                    assert!(frame.interval > Duration::ZERO);
+                    assert!(
+                        frame.brightness >= crate::protocol::brightness_frame(base).unwrap()[2]
+                    );
+                    if base == 0.0 {
+                        assert_eq!(frame.brightness, 0);
+                    }
+                    if base == 1.0 {
+                        assert_eq!(frame.brightness, 255);
+                    }
+                }
+            }
+        }
+        let plan = PerceptualCycle::new(0, 1, 459, 1.0).unwrap();
+        assert!(
+            plan.frames
+                .iter()
+                .any(|frame| frame.interval < Duration::from_millis(20))
+        );
+        assert!(
+            plan.frames
+                .iter()
+                .any(|frame| frame.interval > Duration::from_millis(400))
+        );
+        assert!(PerceptualCycle::new(0, 1, 458, 1.0).is_err());
+        assert!(PerceptualCycle::new(0, 1, 600, f32::NAN).is_err());
+    }
 
     #[test]
     fn every_step_completes_one_exact_lap_with_the_expected_number_of_updates() {
@@ -163,10 +271,10 @@ mod tests {
                 assert_eq!(cycle.advance(), (origin + step) % COLOR_COUNT);
             }
             let minimum = minimum_cycle_seconds(step);
-            assert!(frame_interval(minimum - 1, step).is_err());
+            assert!(average_frame_interval(minimum - 1, step).is_err());
             for duration in [minimum, 600, MAX_CYCLE_SECONDS] {
-                let interval = frame_interval(duration, step).unwrap();
-                assert!(interval >= MIN_FRAME_INTERVAL);
+                let interval = average_frame_interval(duration, step).unwrap();
+                assert!(interval >= MIN_AVERAGE_INTERVAL);
                 assert!(
                     (interval.as_secs_f64() * f64::from(frames_per_cycle(step))
                         - f64::from(duration))
@@ -177,8 +285,8 @@ mod tests {
         }
         assert_eq!(minimum_cycle_seconds(1), 459);
         assert_eq!(minimum_cycle_seconds(100), 5);
-        assert!(frame_interval(600, 0).is_err());
-        assert!(frame_interval(600, 101).is_err());
+        assert!(average_frame_interval(600, 0).is_err());
+        assert!(average_frame_interval(600, 101).is_err());
     }
 
     #[test]
@@ -191,16 +299,20 @@ mod tests {
         );
         assert_eq!(
             next_frame_deadline(start, start + Duration::from_secs(3), interval),
-            start + Duration::from_millis(3300)
+            start + Duration::from_secs(3)
         );
         assert_eq!(
-            next_frame_deadline(start, start + Duration::from_millis(50), MIN_FRAME_INTERVAL),
-            start + Duration::from_millis(350)
+            next_frame_deadline(
+                start,
+                start + Duration::from_millis(50),
+                MIN_AVERAGE_INTERVAL
+            ),
+            start + MIN_AVERAGE_INTERVAL
         );
     }
 
     #[test]
-    fn legacy_and_new_commands_cannot_bypass_the_rate_floor() {
+    fn legacy_and_new_commands_preserve_cycle_duration_bounds() {
         assert_eq!(resolve_cycle_seconds(None, None, 1).unwrap(), 600);
         assert_eq!(resolve_cycle_seconds(None, Some(0.1), 1).unwrap(), 459);
         assert_eq!(resolve_cycle_seconds(None, Some(0.1), 100).unwrap(), 5);

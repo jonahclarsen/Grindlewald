@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     breathing::{
-        MAX_COLOR_STEP, color_step_from_degrees, cycle_from_legacy_pace, default_color_step,
-        default_cycle_seconds, frame_interval,
+        MAX_COLOR_STEP, average_frame_interval, color_step_from_degrees, cycle_from_legacy_pace,
+        default_color_step, default_cycle_seconds,
     },
     protocol::DeviceProfile,
 };
@@ -211,7 +211,7 @@ impl Settings {
         if !(1..=60).contains(&self.connection_hold_seconds) {
             return Err("connection hold time must be between 1 and 60 seconds".into());
         }
-        frame_interval(self.breathing_cycle_seconds, self.breathing_color_step)?;
+        average_frame_interval(self.breathing_cycle_seconds, self.breathing_color_step)?;
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();

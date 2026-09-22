@@ -75,7 +75,7 @@ enum CliCommand {
         /// Seconds for one full spectrum cycle (default 600; minimum depends on color step).
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=3600))]
         cycle_seconds: Option<u32>,
-        /// Legacy seconds per frame; converted to a cycle with a 300 ms minimum interval.
+        /// Legacy average seconds per frame; converted to the existing whole-cycle bounds.
         #[arg(long, conflicts_with = "cycle_seconds", value_parser = clap::value_parser!(f32))]
         pace: Option<f32>,
         /// RGB steps along the color wheel per update (1-100); 1 is the smallest change.

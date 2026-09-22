@@ -3,6 +3,7 @@ pub mod breathing;
 pub mod command;
 pub mod ipc;
 mod network;
+pub mod perceptual;
 pub mod privileged;
 pub mod protocol;
 pub mod settings;
@@ -15,7 +16,7 @@ use command::ControlCommand;
 use settings::Settings;
 use state::SharedState;
 use tauri::{
-    Manager, PhysicalPosition,
+    Emitter, Manager, PhysicalPosition,
     image::Image,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -298,6 +299,14 @@ pub fn run() {
 
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             let state = SharedState::new(settings_path);
+            let mut breathing_frames = state.subscribe_breathing();
+            let playback_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while breathing_frames.changed().await.is_ok() {
+                    let frame = breathing_frames.borrow_and_update().clone();
+                    let _ = playback_handle.emit("breathing-frame", frame);
+                }
+            });
             state.start_scheduler();
             let socket_state = state.clone();
             tauri::async_runtime::spawn(async move {

@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, watch};
 use crate::{
     ble::{BleController, DiscoveredDevice},
     breathing::{
-        COLOR_COUNT, ColorCycle, color_at_position, color_step_from_degrees, frame_interval,
+        COLOR_COUNT, PerceptualCycle, PerceptualFrame, color_at_position, color_step_from_degrees,
         next_frame_deadline, resolve_cycle_seconds,
     },
     command::ControlCommand,
@@ -27,6 +27,24 @@ use crate::{
 pub struct ConnectionStatus {
     connected_count: Option<usize>,
     effect_active: bool,
+    breathing: Option<BreathingPlayback>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BreathingPlayback {
+    pub position: u16,
+    pub brightness: f32,
+    pub generation: u64,
+    pub request_id: u64,
+    pub frame_id: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BreathingSeek {
+    position: u16,
+    generation: u64,
+    request_id: u64,
 }
 
 #[derive(Clone)]
@@ -38,6 +56,8 @@ pub struct SharedState {
     party_active: Arc<AtomicBool>,
     disconnect_signal: watch::Sender<()>,
     disconnecting: Arc<AtomicBool>,
+    breathing_frames: watch::Sender<Option<BreathingPlayback>>,
+    breathing_seek: watch::Sender<Option<BreathingSeek>>,
 }
 
 impl SharedState {
@@ -50,6 +70,38 @@ impl SharedState {
             party_active: Arc::new(AtomicBool::new(false)),
             disconnect_signal: watch::channel(()).0,
             disconnecting: Arc::new(AtomicBool::new(false)),
+            breathing_frames: watch::channel(None).0,
+            breathing_seek: watch::channel(None).0,
+        }
+    }
+
+    pub fn subscribe_breathing(&self) -> watch::Receiver<Option<BreathingPlayback>> {
+        self.breathing_frames.subscribe()
+    }
+
+    fn current_breathing(&self) -> Option<BreathingPlayback> {
+        self.breathing_frames.borrow().clone().filter(|frame| {
+            self.party_active.load(Ordering::SeqCst)
+                && frame.generation == self.party_generation.load(Ordering::SeqCst)
+        })
+    }
+
+    fn publish_breathing(&self, frame: &PerceptualFrame, generation: u64, request_id: u64) {
+        if self.party_active.load(Ordering::SeqCst)
+            && self.party_generation.load(Ordering::SeqCst) == generation
+        {
+            let frame_id = self
+                .breathing_frames
+                .borrow()
+                .as_ref()
+                .map_or(1, |frame| frame.frame_id + 1);
+            self.breathing_frames.send_replace(Some(BreathingPlayback {
+                position: frame.position,
+                brightness: f32::from(frame.brightness) / 255.0,
+                generation,
+                request_id,
+                frame_id,
+            }));
         }
     }
 
@@ -84,6 +136,7 @@ impl SharedState {
         Ok(ConnectionStatus {
             connected_count,
             effect_active: self.party_active.load(Ordering::SeqCst),
+            breathing: self.current_breathing(),
         })
     }
 
@@ -93,6 +146,7 @@ impl SharedState {
         }
         self.disconnect_signal.send_replace(());
         self.party_active.store(false, Ordering::SeqCst);
+        self.breathing_frames.send_replace(None);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let result = self.controller.lock().await.disconnect_all().await;
@@ -111,6 +165,22 @@ impl SharedState {
     async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
         if matches!(&command, ControlCommand::Experiment { device: None, .. }) {
             return Err("experimental commands must target one named light".into());
+        }
+        if let ControlCommand::SeekBreathing {
+            position,
+            request_id,
+        } = &command
+        {
+            if *position >= COLOR_COUNT {
+                return Err("breathing position must be between 0 and 1529".into());
+            }
+            let playback = self.current_breathing().ok_or("Breathing is not running")?;
+            self.breathing_seek.send_replace(Some(BreathingSeek {
+                position: *position,
+                generation: playback.generation,
+                request_id: *request_id,
+            }));
+            return Ok("Breathing".into());
         }
         if let ControlCommand::Party { device } = &command {
             return self.start_party(device.clone()).await;
@@ -137,6 +207,7 @@ impl SharedState {
             return self.stop_effect().await;
         }
         self.party_active.store(false, Ordering::SeqCst);
+        self.breathing_frames.send_replace(None);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
@@ -161,6 +232,7 @@ impl SharedState {
             Ok(settings) => settings,
             Err(error) => {
                 self.party_active.store(false, Ordering::SeqCst);
+                self.breathing_frames.send_replace(None);
                 return Err(error);
             }
         };
@@ -179,6 +251,7 @@ impl SharedState {
             .await
         {
             self.party_active.store(false, Ordering::SeqCst);
+            self.breathing_frames.send_replace(None);
             self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
@@ -213,6 +286,7 @@ impl SharedState {
                 if result.is_err() {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
+                    state.breathing_frames.send_replace(None);
                     state.arm_idle_disconnect(settings.connection_hold_seconds);
                     break;
                 }
@@ -228,77 +302,102 @@ impl SharedState {
         color_step: u16,
         device: Option<String>,
     ) -> Result<String, String> {
-        let interval = frame_interval(cycle_seconds, color_step)?;
+        let settings = self.load_settings()?;
+        let origin = fastrand::u16(0..COLOR_COUNT);
+        let mut cycle =
+            PerceptualCycle::new(origin, color_step, cycle_seconds, settings.brightness)?;
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
         }
         let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
-        let settings = match self.load_settings() {
-            Ok(settings) => settings,
-            Err(error) => {
-                self.party_active.store(false, Ordering::SeqCst);
-                return Err(error);
-            }
-        };
-        let origin = fastrand::u16(0..COLOR_COUNT);
-        let mut cycle = ColorCycle::new(origin, color_step)?;
-        let frame_started = tokio::time::Instant::now();
-        if let Err(error) = self
+        let mut seek = self.breathing_seek.subscribe();
+        let mut index = 0;
+        let mut request_id = 0;
+        let first = &cycle.frames[0];
+        let result = self
             .controller
             .lock()
             .await
             .apply(
                 &settings,
                 &ControlCommand::BreathingFrame {
-                    value: color_at_position(origin),
+                    value: color_at_position(first.position),
+                    brightness: Some(f32::from(first.brightness) / 255.0),
                     device: device.clone(),
                 },
             )
-            .await
-        {
+            .await;
+        if let Err(error) = result {
             self.party_active.store(false, Ordering::SeqCst);
+            self.breathing_frames.send_replace(None);
             self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
-
-        let mut deadline =
-            next_frame_deadline(frame_started, tokio::time::Instant::now(), interval);
+        self.publish_breathing(first, generation, request_id);
+        // Connection setup is not part of the first color interval.
+        let mut deadline = tokio::time::Instant::now() + first.interval;
         let state = self.clone();
         let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
             loop {
-                tokio::select! {
+                let moved = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
-                    _ = tokio::time::sleep_until(deadline) => {},
-                }
+                    _ = seek.changed() => true,
+                    _ = tokio::time::sleep_until(deadline) => false,
+                };
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
-                let position = cycle.advance();
-                let command = ControlCommand::BreathingFrame {
-                    value: color_at_position(position),
-                    device: device.clone(),
-                };
+                if !moved {
+                    index = (index + 1) % cycle.frames.len();
+                }
                 let mut controller = state.controller.lock().await;
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
-                let frame_started = tokio::time::Instant::now();
+                // Coalesce pointer moves arriving during a BLE write or while waiting
+                // for the controller. Seeking never stops the effect or restores a preset.
+                if moved || seek.has_changed().unwrap_or(false) {
+                    let latest = *seek.borrow_and_update();
+                    if let Some(latest) = latest.filter(|seek| seek.generation == generation) {
+                        cycle = PerceptualCycle::new(
+                            latest.position,
+                            color_step,
+                            cycle_seconds,
+                            settings.brightness,
+                        )
+                        .expect("running breathing parameters remain valid");
+                        index = 0;
+                        request_id = latest.request_id;
+                    }
+                }
+                let frame = &cycle.frames[index];
+                let command = ControlCommand::BreathingFrame {
+                    value: color_at_position(frame.position),
+                    brightness: Some(f32::from(frame.brightness) / 255.0),
+                    device: device.clone(),
+                };
+                let started = tokio::time::Instant::now();
                 let result = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
                     result = controller.apply(&settings, &command) => result,
                 };
                 deadline =
-                    next_frame_deadline(frame_started, tokio::time::Instant::now(), interval);
+                    next_frame_deadline(started, tokio::time::Instant::now(), frame.interval);
+                if state.party_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
                 if result.is_err() {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
+                    state.breathing_frames.send_replace(None);
                     state.arm_idle_disconnect(settings.connection_hold_seconds);
                     break;
                 }
+                state.publish_breathing(frame, generation, request_id);
             }
         });
         Ok("Breathing".into())
@@ -306,6 +405,7 @@ impl SharedState {
 
     async fn stop_effect(&self) -> Result<String, String> {
         self.party_active.store(false, Ordering::SeqCst);
+        self.breathing_frames.send_replace(None);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
@@ -603,6 +703,63 @@ mod tests {
         atomic::{AtomicBool, Ordering},
     };
     use tokio::sync::{Mutex, oneshot, watch};
+
+    #[tokio::test]
+    async fn seeking_updates_the_running_effect_without_stopping_or_loading_settings() {
+        use crate::{breathing::PerceptualFrame, command::ControlCommand};
+        use std::time::Duration;
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        assert!(
+            state
+                .execute(ControlCommand::SeekBreathing {
+                    position: 100,
+                    request_id: 1
+                })
+                .await
+                .is_err()
+        );
+        state.party_active.store(true, Ordering::SeqCst);
+        state.party_generation.store(7, Ordering::SeqCst);
+        state.publish_breathing(
+            &PerceptualFrame {
+                position: 0,
+                brightness: 255,
+                interval: Duration::from_secs(1),
+            },
+            7,
+            0,
+        );
+        let mut seek = state.breathing_seek.subscribe();
+        for (position, request_id) in [(100, 1), (765, 2), (1529, 3)] {
+            state
+                .execute(ControlCommand::SeekBreathing {
+                    position,
+                    request_id,
+                })
+                .await
+                .unwrap();
+        }
+        seek.changed().await.unwrap();
+        let latest = (*seek.borrow_and_update()).unwrap();
+        assert_eq!(latest.position, 1529);
+        assert_eq!(latest.request_id, 3);
+        assert_eq!(latest.generation, 7);
+        assert!(state.party_active.load(Ordering::SeqCst));
+        assert_eq!(state.party_generation.load(Ordering::SeqCst), 7);
+        assert!(!state.settings_path.exists());
+        assert!(
+            state
+                .execute(ControlCommand::SeekBreathing {
+                    position: 1530,
+                    request_id: 4
+                })
+                .await
+                .is_err()
+        );
+        state.party_generation.fetch_add(1, Ordering::SeqCst);
+        assert!(state.current_breathing().is_none());
+    }
 
     #[tokio::test]
     async fn disconnect_cancels_an_in_flight_operation_and_releases_its_lock() {

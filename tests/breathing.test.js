@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { minimumCycleSeconds, formatCycleSeconds } from "../src/breathing.js";
+import { minimumCycleSeconds, formatCycleSeconds, cycleSecondsAfterStepChange } from "../src/breathing.js";
 
-test("duration bounds allow every RGB step without exceeding the update rate", () => {
+test("duration bounds preserve the existing minimum average pace", () => {
   assert.equal(minimumCycleSeconds(1), 459);
   assert.equal(minimumCycleSeconds(10), 46);
   assert.equal(minimumCycleSeconds(100), 5);
@@ -19,4 +19,13 @@ test("cycle duration is readable in seconds and minutes", () => {
   assert.equal(formatCycleSeconds(459), "7m 39s");
   assert.equal(formatCycleSeconds(600), "10m 0s");
   assert.equal(formatCycleSeconds(3600), "60m 0s");
+});
+
+test("minimum cycle time follows changes to color step in both directions", () => {
+  assert.equal(cycleSecondsAfterStepChange(459, 1, 2), 230);
+  assert.equal(cycleSecondsAfterStepChange(230, 2, 100), 5);
+  assert.equal(cycleSecondsAfterStepChange(5, 100, 1), 459);
+  assert.equal(cycleSecondsAfterStepChange(600, 1, 100), 600);
+  assert.equal(cycleSecondsAfterStepChange(60, 100, 1), 459);
+  assert.equal(cycleSecondsAfterStepChange(46, 10, 11), minimumCycleSeconds(11));
 });

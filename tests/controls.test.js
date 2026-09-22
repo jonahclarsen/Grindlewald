@@ -88,3 +88,14 @@ test("a failed connection still drains pending changes and permits later updates
   assert.deepEqual(errors, ["Connection failed"]);
   assert.deepEqual(sent, [color("#ff0000"), brightness(0.8), brightness(0.3)]);
 });
+
+test("hue seeks coalesce to the latest position without becoming static color commands", async () => {
+  const {queue, sent, connection} = disconnectedQueue();
+  const seek = (position, request_id) => ({command: "seek_breathing", position, request_id});
+  const done = queue.enqueue(seek(1, 1));
+  queue.enqueue(seek(255, 2));
+  queue.enqueue(seek(765, 3));
+  connection.resolve();
+  await done;
+  assert.deepEqual(sent, [seek(1, 1), seek(765, 3)]);
+});

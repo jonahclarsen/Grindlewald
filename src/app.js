@@ -1,4 +1,4 @@
-import { minimumCycleSeconds, formatCycleSeconds } from "./breathing.js";
+import { minimumCycleSeconds, formatCycleSeconds, cycleSecondsAfterStepChange } from "./breathing.js";
 import { createControlQueue } from "./controls.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
@@ -46,6 +46,13 @@ const controlQueue = createControlQueue(
     onError: (error) => setStatus(String(error), "error"),
   },
 );
+const breathingSeekQueue = createControlQueue(
+  (command) => call("execute_control", { command }),
+  { onError: (error) => setStatus(String(error), "error") },
+);
+let latestBreathingFrame = null;
+let breathingSeekRequestId = 0;
+let huePointerDown = false;
 let activeEffect = null;
 let connectionStatus = null;
 let disconnecting = false;
@@ -145,12 +152,39 @@ function whitePositionFromHex(value) {
   return bestPosition;
 }
 
+function paintHue(hue) {
+  const normalizedHue = Math.max(0, Math.min(360, hue));
+  $("#hue-knob").style.setProperty("--knob-position", `${normalizedHue / 360 * 100}%`);
+  $("#color-swatch").style.background = colorAtHue(normalizedHue);
+  $("#hue-track").setAttribute("aria-valuenow", String(normalizedHue));
+}
+
+function applyBreathingPlayback(frame) {
+  if (!frame || activeEffect !== "breathe") return;
+  if (latestBreathingFrame && (frame.generation < latestBreathingFrame.generation ||
+      (frame.generation === latestBreathingFrame.generation && frame.frameId < latestBreathingFrame.frameId))) return;
+  if (latestBreathingFrame && frame.generation > latestBreathingFrame.generation) {
+    breathingSeekRequestId = 0;
+    breathingSeekQueue.clear();
+  }
+  latestBreathingFrame = frame;
+  if (!huePointerDown && frame.requestId >= breathingSeekRequestId) {
+    paintHue(frame.position / 1530 * 360);
+  }
+}
+
 function updateHue(hue, shouldSend = true) {
   const normalizedHue = Math.max(0, Math.min(360, hue));
+  paintHue(normalizedHue);
+  if (shouldSend && activeEffect === "breathe") {
+    if (disconnecting) return;
+    return breathingSeekQueue.enqueue({
+      command: "seek_breathing",
+      position: Math.round(normalizedHue / 360 * 1530) % 1530,
+      request_id: ++breathingSeekRequestId,
+    });
+  }
   settings.color = colorAtHue(normalizedHue);
-  $("#hue-knob").style.setProperty("--knob-position", `${normalizedHue / 360 * 100}%`);
-  $("#color-swatch").style.background = settings.color;
-  $("#hue-track").setAttribute("aria-valuenow", String(Math.round(normalizedHue)));
   if (shouldSend) queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
 }
 
@@ -177,7 +211,7 @@ function makeDraggable(track, update) {
   });
   track.addEventListener("pointerup", (event) => {
     if (track.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
-    save();
+    if (!(track.id === "hue-track" && activeEffect === "breathe")) save();
   });
 }
 
@@ -261,6 +295,10 @@ async function refreshConnection() {
     if (generation === controlGeneration) {
       connectionStatus = status;
       if (!status.effectActive && controlsInFlight === 0) setEffectActive(null);
+      else if (status.breathing && controlsInFlight === 0) {
+        if (activeEffect !== "breathe") setEffectActive("breathe");
+        applyBreathingPlayback(status.breathing);
+      }
     }
   } catch {
     if (generation === controlGeneration) connectionStatus = null;
@@ -313,7 +351,7 @@ async function callBackend(command, args = {}) {
       return "Disconnected from lights";
     }
     if (command === "execute_control") {
-      demoEffectActive = ["party", "breathe"].includes(args.command.command);
+      if (args.command.command !== "seek_breathing") demoEffectActive = ["party", "breathe"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
     if (command === "home_network_status") return { fingerprint: "router-sha256:" + "0".repeat(64) };
@@ -357,7 +395,15 @@ function queueControl(command) {
 }
 
 function setEffectActive(effect) {
+  if (effect !== activeEffect) {
+    breathingSeekQueue.clear();
+    breathingSeekRequestId = 0;
+    latestBreathingFrame = null;
+  }
   activeEffect = effect;
+  $("#hue-track").setAttribute("aria-label", effect === "breathe" ? "Breathing hue; drag to move within the cycle" : "Color hue");
+  $("#color-picker-hint").textContent = effect === "breathe" ? "Breathing · drag to move" : "Drag to choose a hue";
+  if (effect !== "breathe" && settings) paintHue(hueFromHex(settings.color));
   [["#party-button", "party", "Party"], ["#breathing-button", "breathe", "Breathe"]].forEach(([selector, name, label]) => {
     const button = $(selector);
     const active = effect === name;
@@ -595,7 +641,7 @@ function renderBreathingControls() {
 }
 
 function renderAll() {
-  updateHue(hueFromHex(settings.color), false);
+  paintHue(activeEffect === "breathe" && latestBreathingFrame ? latestBreathingFrame.position / 1530 * 360 : hueFromHex(settings.color));
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
@@ -899,13 +945,20 @@ document.addEventListener("change", async (event) => {
   }
 });
 
+$("#hue-track").addEventListener("pointerdown", () => { huePointerDown = true; });
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  $("#hue-track").addEventListener(event, () => {
+    huePointerDown = false;
+    if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
+  });
+}
 makeDraggable($("#hue-track"), (position) => updateHue(position * 360));
 makeDraggable($("#white-track"), updateWhite);
 $("#hue-track").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
   updateHue(Number(event.currentTarget.getAttribute("aria-valuenow")) + (event.key === "ArrowRight" ? 3 : -3));
-  save();
+  if (activeEffect !== "breathe") save();
 });
 $("#white-track").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -968,7 +1021,9 @@ $("#breathing-cycle").addEventListener("change", async () => {
   }
 });
 $("#breathing-color-step").addEventListener("input", (event) => {
-  settings.breathingColorStep = Number(event.target.value);
+  const nextStep = Number(event.target.value);
+  settings.breathingCycleSeconds = cycleSecondsAfterStepChange(settings.breathingCycleSeconds, settings.breathingColorStep, nextStep);
+  settings.breathingColorStep = nextStep;
   renderBreathingControls();
 });
 $("#breathing-color-step").addEventListener("change", async () => {
@@ -1079,6 +1134,10 @@ document.addEventListener("keydown", (event) => {
     call("hide_window");
   }
 });
+
+if (window.__TAURI__?.event?.listen) {
+  await window.__TAURI__.event.listen("breathing-frame", ({ payload }) => applyBreathingPlayback(payload));
+}
 
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");
 await refreshPrivilegedService();
