@@ -162,7 +162,11 @@ impl SharedState {
     }
 
     async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
-        if let ControlCommand::TraceBreathing { seconds } = &command {
+        if let ControlCommand::TraceBreathing {
+            seconds,
+            cache_characteristic,
+        } = &command
+        {
             if self.current_breathing().is_none() {
                 return Err("Start breathing before capturing timing".into());
             }
@@ -171,6 +175,7 @@ impl SharedState {
                     .parent()
                     .ok_or("missing settings directory")?,
                 *seconds,
+                *cache_characteristic,
             )
             .await;
         }

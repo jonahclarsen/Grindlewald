@@ -1,7 +1,10 @@
 //! Opt-in, bounded diagnostics. Buffer in memory; write only after capture ends.
 use std::{
     path::Path,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -13,6 +16,8 @@ struct Sample {
     duration_ms: f64,
     ok: bool,
 }
+
+pub static CACHE_CHARACTERISTIC: AtomicBool = AtomicBool::new(false);
 
 struct Capture {
     started: Instant,
@@ -51,11 +56,16 @@ impl Drop for Session {
             .is_some_and(|capture| capture.started == self.0)
         {
             capture.take();
+            CACHE_CHARACTERISTIC.store(false, Ordering::Relaxed);
         }
     }
 }
 
-pub async fn capture(directory: &Path, seconds: u32) -> Result<String, String> {
+pub async fn capture(
+    directory: &Path,
+    seconds: u32,
+    cache_characteristic: bool,
+) -> Result<String, String> {
     if !(5..=300).contains(&seconds) {
         return Err("trace duration must be between 5 and 300 seconds".into());
     }
@@ -65,6 +75,7 @@ pub async fn capture(directory: &Path, seconds: u32) -> Result<String, String> {
         if capture.is_some() {
             return Err("a breathing timing capture is already running".into());
         }
+        CACHE_CHARACTERISTIC.store(cache_characteristic, Ordering::Relaxed);
         *capture = Some(Capture {
             started,
             deadline: started + Duration::from_secs(u64::from(seconds)),
@@ -73,14 +84,15 @@ pub async fn capture(directory: &Path, seconds: u32) -> Result<String, String> {
     }
     let session = Session(started);
     tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
-    let capture = CAPTURE
-        .lock()
-        .unwrap()
-        .take()
-        .expect("session owns the capture");
+    let capture = {
+        let mut capture = CAPTURE.lock().unwrap();
+        CACHE_CHARACTERISTIC.store(false, Ordering::Relaxed);
+        capture.take().expect("session owns the capture")
+    };
     drop(session);
     let report = serde_json::json!({
         "duration_seconds": seconds,
+        "cache_characteristic": cache_characteristic,
         "sample_limit_reached": capture.samples.len() == MAX_SAMPLES,
         "samples": capture.samples,
     });

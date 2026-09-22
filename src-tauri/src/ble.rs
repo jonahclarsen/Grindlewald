@@ -1,7 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use btleplug::{
-    api::{Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter, WriteType},
+    api::{
+        Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
+    },
     platform::{Adapter, Manager, Peripheral},
 };
 use futures::{Stream, StreamExt, future::join_all};
@@ -27,6 +29,7 @@ pub struct BleController {
     adapter: Option<Adapter>,
     connections: HashMap<String, Peripheral>,
     light_states: HashMap<String, LightState>,
+    control_characteristics: HashMap<String, Characteristic>,
 }
 
 impl Default for BleController {
@@ -41,6 +44,7 @@ impl BleController {
             adapter: None,
             connections: HashMap::new(),
             light_states: HashMap::new(),
+            control_characteristics: HashMap::new(),
         }
     }
 
@@ -128,22 +132,46 @@ impl BleController {
         let characteristic_uuid = Uuid::parse_str(CONTROL_CHARACTERISTIC)
             .map_err(|error| format!("invalid control UUID: {error}"))?;
 
+        let cached = crate::timing::CACHE_CHARACTERISTIC.load(std::sync::atomic::Ordering::Relaxed);
         let writes = selected.iter().enumerate().map(|(light, device)| {
             let peripheral = self.connections[&normalize(&device.identifier)].clone();
             let key = normalize(&device.identifier);
             let mut next_state = self.light_states.get(&key).cloned().unwrap_or_default();
+            let preparation_started = std::time::Instant::now();
             let frames = next_state.frames(settings, command, device.profile);
-            async move {
+            let characteristic = if cached {
+                self.control_characteristics.get(&key).cloned()
+            } else {
+                None
+            }
+            .or_else(|| {
                 let characteristic = peripheral
                     .characteristics()
                     .into_iter()
-                    .find(|characteristic| characteristic.uuid == characteristic_uuid)
-                    .ok_or_else(|| {
-                        format!(
-                            "{} does not expose the Govee control characteristic",
-                            device.name
-                        )
-                    })?;
+                    .find(|characteristic| characteristic.uuid == characteristic_uuid);
+                if cached {
+                    if let Some(characteristic) = &characteristic {
+                        self.control_characteristics
+                            .insert(key.clone(), characteristic.clone());
+                    }
+                }
+                characteristic
+            });
+            if breathing {
+                crate::timing::record(
+                    "prepare",
+                    preparation_started,
+                    Some(light + 1),
+                    characteristic.is_some(),
+                );
+            }
+            async move {
+                let characteristic = characteristic.ok_or_else(|| {
+                    format!(
+                        "{} does not expose the Govee control characteristic",
+                        device.name
+                    )
+                })?;
 
                 for frame in frames? {
                     let started = std::time::Instant::now();
@@ -189,6 +217,7 @@ impl BleController {
             };
             if !connected {
                 self.connections.remove(&connection_key);
+                self.control_characteristics.remove(&connection_key);
                 self.light_states
                     .entry(connection_key.clone())
                     .or_default()
@@ -305,6 +334,7 @@ impl BleController {
         for (identifier, released) in results {
             if released {
                 self.connections.remove(&identifier);
+                self.control_characteristics.remove(&identifier);
                 self.light_states.entry(identifier).or_default().needs_sync = true;
             }
         }

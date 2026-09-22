@@ -48,6 +48,8 @@ pub enum ControlCommand {
     },
     TraceBreathing {
         seconds: u32,
+        #[serde(default)]
+        cache_characteristic: bool,
     },
     SeekBreathing {
         position: u16,
