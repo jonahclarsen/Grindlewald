@@ -16,7 +16,7 @@ const demoSettings = {
   white: "#ffd5ad",
   brightness: 0.4,
   connectionHoldSeconds: 6,
-  breathingIntervalMs: 400,
+  breathingIntervalMs: 350,
   breathingColorStep: 1,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },

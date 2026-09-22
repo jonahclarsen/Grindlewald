@@ -8,7 +8,7 @@ pub fn default_color_step() -> u16 {
     1
 }
 pub fn default_interval_ms() -> u32 {
-    400
+    350
 }
 
 pub fn frame_interval(interval_ms: u32) -> Result<Duration, String> {
@@ -156,7 +156,7 @@ mod tests {
                 valid
             );
         }
-        assert_eq!(resolve_interval_ms(None, None, None, 1).unwrap(), 400);
+        assert_eq!(resolve_interval_ms(None, None, None, 1).unwrap(), 350);
         assert_eq!(resolve_interval_ms(None, None, Some(600), 1).unwrap(), 400);
         assert_eq!(resolve_interval_ms(None, None, Some(5), 100).unwrap(), 300);
         assert!(resolve_interval_ms(Some(400), Some(0.4), None, 1).is_err());

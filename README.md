@@ -16,7 +16,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
-- Breathing mode with 1–100 integer RGB color steps and a fixed 250–1,000 ms interval in 50 ms increments; defaults to step 1 and 400 ms
+- Breathing mode with 1–100 integer RGB color steps and a fixed 250–1,000 ms interval in 50 ms increments; defaults to step 1 and 350 ms
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -81,7 +81,7 @@ grindlewaldctl party --light Bedroom
 grindlewaldctl stop-party
 
 # Slowly breathe between colors; 1 is the smallest RGB change
-grindlewaldctl breathe --interval-ms 400 --color-step 1
+grindlewaldctl breathe --interval-ms 350 --color-step 1
 grindlewaldctl breathe --interval-ms 250 --color-step 10 --light Bedroom
 grindlewaldctl stop-effect
 
@@ -150,7 +150,7 @@ The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its in
 
 **Color step** is an integer from 1 to 100, defaulting to 1. One step changes one RGB channel by exactly 1 on its 0–255 scale. The wheel contains 1,530 distinct positions in the order red → yellow → green → cyan → blue → magenta. Each update advances exactly the selected number of positions, wrapping around without shortening the step at the end of a lap.
 
-**Step interval** is the time between updates: 250–1,000 milliseconds in increments of 50, defaulting to 400 ms. Every hue uses the same interval, independent of Color step. Brightness stays at the selected level. Slow Bluetooth writes can lengthen the interval; writes remain serialized without accumulating catch-up commands.
+**Step interval** is the time between updates: 250–1,000 milliseconds in increments of 50, defaulting to 350 ms. Every hue uses the same interval, independent of Color step. Brightness stays at the selected level. Slow Bluetooth writes can lengthen the interval; writes remain serialized without accumulating catch-up commands.
 
 Older full-cycle settings migrate to their average interval (`cycleSeconds × 1000 / ceil(1530 / colorStep)`), rounded to the nearest 50 ms and clamped to the new range. Older per-step settings are rounded and clamped too. New CLI commands use `--interval-ms` and `--color-step`; `--pace` still accepts seconds within the same bounds and increments. Legacy `--cycle-seconds` commands convert to a supported interval, and `--hue-step` converts degrees to integer RGB steps.
 

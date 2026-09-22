@@ -78,7 +78,7 @@ enum CliCommand {
     },
     /// Start a slow color-breathing effect.
     Breathe {
-        /// Milliseconds between color steps (250-1000 in increments of 50; default 400).
+        /// Milliseconds between color steps (250-1000 in increments of 50; default 350).
         #[arg(long, conflicts_with_all = ["pace", "cycle_seconds"], value_parser = parse_interval)]
         interval_ms: Option<u32>,
         /// Legacy full-cycle duration, converted to the nearest supported step interval.

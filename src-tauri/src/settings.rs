@@ -382,7 +382,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
         for (legacy, step, interval) in [
-            (serde_json::json!({}), 1, 400),
+            (serde_json::json!({}), 1, 350),
             (
                 serde_json::json!({"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}),
                 1,
