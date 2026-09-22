@@ -216,12 +216,7 @@ impl BleController {
                 false
             };
             if !connected {
-                self.connections.remove(&connection_key);
-                self.control_characteristics.remove(&connection_key);
-                self.light_states
-                    .entry(connection_key.clone())
-                    .or_default()
-                    .needs_sync = true;
+                self.forget_connection(&connection_key);
                 missing.push(device.clone());
             }
         }
@@ -333,9 +328,7 @@ impl BleController {
         .await;
         for (identifier, released) in results {
             if released {
-                self.connections.remove(&identifier);
-                self.control_characteristics.remove(&identifier);
-                self.light_states.entry(identifier).or_default().needs_sync = true;
+                self.forget_connection(&identifier);
             }
         }
         if self.connections.is_empty() {
@@ -343,6 +336,15 @@ impl BleController {
         } else {
             Err("Could not disconnect every light. Try Disconnect again.".into())
         }
+    }
+
+    fn forget_connection(&mut self, identifier: &str) {
+        self.connections.remove(identifier);
+        self.control_characteristics.remove(identifier);
+        self.light_states
+            .entry(identifier.to_owned())
+            .or_default()
+            .needs_sync = true;
     }
 
     pub async fn keep_alive(&mut self) {
@@ -799,6 +801,43 @@ mod tests {
                 brightness_frame(settings.brightness).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn losing_a_connection_invalidates_its_characteristic_and_requires_resync() {
+        use btleplug::api::CharPropFlags;
+        let characteristic = Characteristic {
+            uuid: Uuid::parse_str(CONTROL_CHARACTERISTIC).unwrap(),
+            service_uuid: Uuid::nil(),
+            properties: CharPropFlags::WRITE_WITHOUT_RESPONSE,
+            descriptors: Default::default(),
+        };
+        let mut controller = BleController::new();
+        for key in ["TEST-LIGHT-1", "TEST-LIGHT-2"] {
+            controller
+                .control_characteristics
+                .insert(key.into(), characteristic.clone());
+            controller.light_states.insert(
+                key.into(),
+                LightState {
+                    needs_sync: false,
+                    ..Default::default()
+                },
+            );
+        }
+        controller.forget_connection("TEST-LIGHT-1");
+        assert!(
+            !controller
+                .control_characteristics
+                .contains_key("TEST-LIGHT-1")
+        );
+        assert!(controller.light_states["TEST-LIGHT-1"].needs_sync);
+        assert!(
+            controller
+                .control_characteristics
+                .contains_key("TEST-LIGHT-2")
+        );
+        assert!(!controller.light_states["TEST-LIGHT-2"].needs_sync);
     }
 
     #[test]

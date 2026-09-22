@@ -17,7 +17,12 @@ struct Sample {
     ok: bool,
 }
 
-pub static CACHE_CHARACTERISTIC: AtomicBool = AtomicBool::new(false);
+// Only diagnostics temporarily select the previous uncached path.
+pub static CACHE_CHARACTERISTIC: AtomicBool = AtomicBool::new(true);
+
+pub fn default_cache_characteristic() -> bool {
+    true
+}
 
 struct Capture {
     started: Instant,
@@ -56,7 +61,7 @@ impl Drop for Session {
             .is_some_and(|capture| capture.started == self.0)
         {
             capture.take();
-            CACHE_CHARACTERISTIC.store(false, Ordering::Relaxed);
+            CACHE_CHARACTERISTIC.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -86,7 +91,7 @@ pub async fn capture(
     tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
     let capture = {
         let mut capture = CAPTURE.lock().unwrap();
-        CACHE_CHARACTERISTIC.store(false, Ordering::Relaxed);
+        CACHE_CHARACTERISTIC.store(true, Ordering::Relaxed);
         capture.take().expect("session owns the capture")
     };
     drop(session);
@@ -105,4 +110,28 @@ pub async fn capture(
     std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     std::fs::write(&path, contents).map_err(|error| error.to_string())?;
     Ok(path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelling_a_capture_restores_the_normal_path_and_allows_another_capture() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut pending = Box::pin(capture(directory.path(), 5, false));
+        tokio::select! {
+            biased;
+            _ = &mut pending => panic!("capture should wait for its duration"),
+            _ = tokio::task::yield_now() => {},
+        }
+        assert!(!CACHE_CHARACTERISTIC.load(Ordering::Relaxed));
+        assert!(capture(directory.path(), 5, true).await.is_err());
+        drop(pending);
+        assert!(CAPTURE.lock().unwrap().is_none());
+        assert!(CACHE_CHARACTERISTIC.load(Ordering::Relaxed));
+        assert!(capture(directory.path(), 0, true).await.is_err());
+        assert!(capture(directory.path(), 301, true).await.is_err());
+        assert!(!directory.path().join("diagnostics").exists());
+    }
 }

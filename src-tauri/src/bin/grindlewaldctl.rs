@@ -100,9 +100,9 @@ enum CliCommand {
     TraceBreathing {
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(5..=300))]
         seconds: u32,
-        /// Benchmark caching the control characteristic between writes.
+        /// Compare the previous path that looks up the control characteristic for every write.
         #[arg(long)]
-        cache_characteristic: bool,
+        uncached_characteristic: bool,
     },
     /// Stop party mode and restore the selected static color.
     StopParty,
@@ -176,10 +176,10 @@ async fn main() -> anyhow::Result<()> {
         }
         CliCommand::TraceBreathing {
             seconds,
-            cache_characteristic,
+            uncached_characteristic,
         } => ControlCommand::TraceBreathing {
             seconds,
-            cache_characteristic,
+            cache_characteristic: !uncached_characteristic,
         },
         CliCommand::StopParty => ControlCommand::StopParty,
         CliCommand::StopEffect => ControlCommand::StopEffect,

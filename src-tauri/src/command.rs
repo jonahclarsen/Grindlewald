@@ -48,7 +48,7 @@ pub enum ControlCommand {
     },
     TraceBreathing {
         seconds: u32,
-        #[serde(default)]
+        #[serde(default = "crate::timing::default_cache_characteristic")]
         cache_characteristic: bool,
     },
     SeekBreathing {
