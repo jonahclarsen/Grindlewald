@@ -32,8 +32,11 @@ pub enum ControlCommand {
     },
     Breathe {
         pace_seconds: f32,
-        #[serde(default = "default_breathing_hue_step_degrees")]
-        hue_step_degrees: f32,
+        #[serde(default = "crate::breathing::default_color_step")]
+        color_step: u16,
+        // Accept commands from older CLI installations. New clients send color_step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hue_step_degrees: Option<f32>,
         device: Option<String>,
     },
     StopParty,
@@ -51,10 +54,6 @@ pub enum ControlCommand {
         payload: String,
         device: Option<String>,
     },
-}
-
-fn default_breathing_hue_step_degrees() -> f32 {
-    2.0
 }
 
 impl ControlCommand {

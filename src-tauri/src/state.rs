@@ -13,6 +13,7 @@ use tokio::sync::{Mutex, watch};
 
 use crate::{
     ble::{BleController, DiscoveredDevice},
+    breathing::{COLOR_COUNT, color_at_position, color_step_from_degrees, validate_color_step},
     command::ControlCommand,
     privileged,
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
@@ -113,12 +114,20 @@ impl SharedState {
         }
         if let ControlCommand::Breathe {
             pace_seconds,
+            color_step,
             hue_step_degrees,
             device,
         } = &command
         {
             return self
-                .start_breathing(*pace_seconds, *hue_step_degrees, device.clone())
+                .start_breathing(
+                    *pace_seconds,
+                    hue_step_degrees
+                        .map(color_step_from_degrees)
+                        .transpose()?
+                        .unwrap_or(*color_step),
+                    device.clone(),
+                )
                 .await;
         }
         if matches!(
@@ -216,15 +225,13 @@ impl SharedState {
     async fn start_breathing(
         &self,
         pace_seconds: f32,
-        hue_step_degrees: f32,
+        color_step: u16,
         device: Option<String>,
     ) -> Result<String, String> {
         if !pace_seconds.is_finite() || !(0.1..=2.0).contains(&pace_seconds) {
             return Err("breathing pace must be between 0.1 and 2 seconds".into());
         }
-        if !hue_step_degrees.is_finite() || !(0.1..=120.0).contains(&hue_step_degrees) {
-            return Err("breathing hue step must be between 0.1 and 120 degrees".into());
-        }
+        validate_color_step(color_step)?;
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
         }
@@ -237,7 +244,7 @@ impl SharedState {
                 return Err(error);
             }
         };
-        let mut hue = random_hue();
+        let mut position = fastrand::u16(0..COLOR_COUNT);
         if let Err(error) = self
             .controller
             .lock()
@@ -245,7 +252,7 @@ impl SharedState {
             .apply(
                 &settings,
                 &ControlCommand::BreathingFrame {
-                    value: color_at_hue(hue),
+                    value: color_at_position(position),
                     device: device.clone(),
                 },
             )
@@ -264,9 +271,9 @@ impl SharedState {
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
-                hue = (hue + hue_step_degrees) % 360.0;
+                position = (position + color_step) % COLOR_COUNT;
                 let command = ControlCommand::BreathingFrame {
-                    value: color_at_hue(hue),
+                    value: color_at_position(position),
                     device: device.clone(),
                 };
                 let mut controller = state.controller.lock().await;
@@ -580,27 +587,9 @@ fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<Contro
     })
 }
 
-fn random_hue() -> f32 {
-    fastrand::f32() * 360.0
-}
-
-fn color_at_hue(hue: f32) -> String {
-    let sector = hue.rem_euclid(360.0) / 60.0;
-    let intermediate = (255.0 * (1.0 - ((sector % 2.0) - 1.0).abs())).round() as u8;
-    let [red, green, blue] = match sector.floor() as u8 {
-        0 => [255, intermediate, 0],
-        1 => [intermediate, 255, 0],
-        2 => [0, 255, intermediate],
-        3 => [0, intermediate, 255],
-        4 => [intermediate, 0, 255],
-        _ => [255, 0, intermediate],
-    };
-    format!("#{red:02x}{green:02x}{blue:02x}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{SharedState, color_at_hue, random_hue, until_disconnect};
+    use super::{SharedState, until_disconnect};
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -661,20 +650,5 @@ mod tests {
         );
         assert!(!state.disconnecting.load(Ordering::SeqCst));
         assert!(!state.settings_path().exists());
-    }
-
-    #[test]
-    fn breathing_colors_move_continuously_around_the_hue_wheel() {
-        assert_eq!(color_at_hue(0.0), "#ff0000");
-        assert_eq!(color_at_hue(60.0), "#ffff00");
-        assert_eq!(color_at_hue(120.0), "#00ff00");
-        assert_eq!(color_at_hue(360.0), "#ff0000");
-    }
-
-    #[test]
-    fn random_breathing_hues_stay_on_the_color_wheel() {
-        for _ in 0..100 {
-            assert!((0.0..360.0).contains(&random_hue()));
-        }
     }
 }

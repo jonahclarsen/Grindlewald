@@ -1,9 +1,14 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use grindlewald_lib::{
+    breathing::{color_step_from_degrees, default_color_step},
     command::{CommandResponse, ControlCommand},
     ipc::socket_path,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+fn parse_hue_step(value: &str) -> Result<u16, String> {
+    color_step_from_degrees(value.parse::<f32>().map_err(|error| error.to_string())?)
+}
 
 #[derive(Parser)]
 #[command(
@@ -69,9 +74,12 @@ enum CliCommand {
     Breathe {
         #[arg(long, default_value_t = 0.75, value_parser = clap::value_parser!(f32))]
         pace: f32,
-        /// Degrees to move around the hue wheel after each update (0.1-120).
-        #[arg(long, default_value_t = 2.0, value_parser = clap::value_parser!(f32))]
-        hue_step: f32,
+        /// RGB steps along the color wheel per update (1-510); 1 is the smallest change.
+        #[arg(long, default_value_t = default_color_step(), value_parser = clap::value_parser!(u16).range(1..=510))]
+        color_step: u16,
+        /// Legacy degrees per update (0.1-120), rounded to the nearest RGB step.
+        #[arg(long, conflicts_with = "color_step", value_parser = parse_hue_step)]
+        hue_step: Option<u16>,
         #[arg(short, long)]
         light: Option<String>,
     },
@@ -126,11 +134,13 @@ async fn main() -> anyhow::Result<()> {
         CliCommand::Party { light } => ControlCommand::Party { device: light },
         CliCommand::Breathe {
             pace,
+            color_step,
             hue_step,
             light,
         } => ControlCommand::Breathe {
             pace_seconds: pace,
-            hue_step_degrees: hue_step,
+            color_step: hue_step.unwrap_or(color_step),
+            hue_step_degrees: None,
             device: light,
         },
         CliCommand::StopParty => ControlCommand::StopParty,
@@ -162,5 +172,39 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     } else {
         Err(anyhow::anyhow!(response.message))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn breathing_cli_accepts_integer_steps_and_converts_legacy_degrees() {
+        for (args, expected) in [
+            (vec!["ctl", "breathe"], 9),
+            (vec!["ctl", "breathe", "--color-step", "1"], 1),
+            (vec!["ctl", "breathe", "--color-step", "510"], 510),
+            (vec!["ctl", "breathe", "--hue-step", "2"], 9),
+            (vec!["ctl", "breathe", "--hue-step", "0.1"], 1),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let CliCommand::Breathe {
+                color_step,
+                hue_step,
+                ..
+            } = cli.command
+            else {
+                panic!("expected breathe")
+            };
+            assert_eq!(hue_step.unwrap_or(color_step), expected);
+        }
+        for invalid in ["0", "511", "1.5", "-1"] {
+            assert!(Cli::try_parse_from(["ctl", "breathe", "--color-step", invalid]).is_err());
+        }
+        assert!(
+            Cli::try_parse_from(["ctl", "breathe", "--color-step", "1", "--hue-step", "2"])
+                .is_err()
+        );
     }
 }

@@ -17,7 +17,7 @@ const demoSettings = {
   brightness: 0.4,
   connectionHoldSeconds: 6,
   breathingPaceSeconds: 0.75,
-  breathingHueStepDegrees: 2,
+  breathingColorStep: 9,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -588,8 +588,8 @@ function renderAll() {
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   $("#breathing-pace").value = settings.breathingPaceSeconds;
   $("#breathing-pace-output").value = `${Number(settings.breathingPaceSeconds).toFixed(2)}s`;
-  $("#breathing-hue-step").value = settings.breathingHueStepDegrees;
-  $("#breathing-hue-step-output").value = `${Number(settings.breathingHueStepDegrees).toFixed(1)}°`;
+  $("#breathing-color-step").value = settings.breathingColorStep;
+  $("#breathing-color-step-output").value = String(settings.breathingColorStep);
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -927,7 +927,7 @@ async function toggleEffect(effect) {
           : {
               command: "breathe",
               pace_seconds: settings.breathingPaceSeconds,
-              hue_step_degrees: settings.breathingHueStepDegrees,
+              color_step: settings.breathingColorStep,
               device: null,
             }
         : { command: "stop_effect" },
@@ -956,11 +956,11 @@ $("#breathing-pace").addEventListener("change", async () => {
     if (generation === controlGeneration) await toggleEffect("breathe");
   }
 });
-$("#breathing-hue-step").addEventListener("input", (event) => {
-  settings.breathingHueStepDegrees = Number(event.target.value);
-  $("#breathing-hue-step-output").value = `${settings.breathingHueStepDegrees.toFixed(1)}°`;
+$("#breathing-color-step").addEventListener("input", (event) => {
+  settings.breathingColorStep = Number(event.target.value);
+  $("#breathing-color-step-output").value = String(settings.breathingColorStep);
 });
-$("#breathing-hue-step").addEventListener("change", async () => {
+$("#breathing-color-step").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
     const generation = controlGeneration;

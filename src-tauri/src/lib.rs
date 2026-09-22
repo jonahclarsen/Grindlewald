@@ -1,4 +1,5 @@
 pub mod ble;
+pub mod breathing;
 pub mod command;
 pub mod ipc;
 mod network;

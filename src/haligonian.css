@@ -174,7 +174,7 @@ button:not(:disabled):hover { filter: brightness(1.16); }
 :is(.primary, .secondary, .effect-button, .preset-chip, .round-button, .icon-button):not(:disabled):active { border-style: inset; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="slider"]:focus-visible, summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
-.service-notice { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 10px; border: 2px solid var(--orange); background: #33271d; box-shadow: var(--bevel); }
+.service-notice { position: sticky; top: -10px; z-index: 3; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 10px; border: 2px solid var(--orange); background: #33271d; box-shadow: var(--bevel); }
 .service-notice[hidden] { display: none; }
 .service-notice strong { color: #ffb078; font: bold 12px var(--pixel); }
 .service-notice p { margin-top: 4px; color: #edc496; font-size: 11px; line-height: 1.4; }

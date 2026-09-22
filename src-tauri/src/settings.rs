@@ -7,7 +7,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::DeviceProfile;
+use crate::{
+    breathing::{color_step_from_degrees, default_color_step, validate_color_step},
+    protocol::DeviceProfile,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -100,8 +103,8 @@ pub struct Settings {
     pub connection_hold_seconds: u64,
     #[serde(default = "default_breathing_pace_seconds")]
     pub breathing_pace_seconds: f32,
-    #[serde(default = "default_breathing_hue_step_degrees")]
-    pub breathing_hue_step_degrees: f32,
+    #[serde(default = "default_color_step")]
+    pub breathing_color_step: u16,
     #[serde(default)]
     pub breathing_defaults_version: u8,
     #[serde(default)]
@@ -130,10 +133,6 @@ fn default_breathing_pace_seconds() -> f32 {
     0.75
 }
 
-fn default_breathing_hue_step_degrees() -> f32 {
-    2.0
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -143,7 +142,7 @@ impl Default for Settings {
             brightness: default_brightness(),
             connection_hold_seconds: default_connection_hold_seconds(),
             breathing_pace_seconds: default_breathing_pace_seconds(),
-            breathing_hue_step_degrees: default_breathing_hue_step_degrees(),
+            breathing_color_step: default_color_step(),
             breathing_defaults_version: 1,
             presets: vec![
                 Preset {
@@ -188,9 +187,6 @@ impl Settings {
             if self.breathing_pace_seconds == 2.0 {
                 self.breathing_pace_seconds = default_breathing_pace_seconds();
             }
-            if self.breathing_hue_step_degrees == 12.0 {
-                self.breathing_hue_step_degrees = default_breathing_hue_step_degrees();
-            }
             self.breathing_defaults_version = 1;
         }
         if self.breathing_pace_seconds > 2.0 {
@@ -233,11 +229,7 @@ impl Settings {
         {
             return Err("breathing pace must be between 0.1 and 2 seconds".into());
         }
-        if !self.breathing_hue_step_degrees.is_finite()
-            || !(0.1..=120.0).contains(&self.breathing_hue_step_degrees)
-        {
-            return Err("breathing hue step must be between 0.1 and 120 degrees".into());
-        }
+        validate_color_step(self.breathing_color_step)?;
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();
@@ -306,8 +298,28 @@ pub fn load(path: &Path) -> Result<Settings, String> {
         return Ok(Settings::default());
     }
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let mut settings: Settings =
+    let mut value: serde_json::Value =
         serde_json::from_str(&contents).map_err(|error| error.to_string())?;
+    if value.get("breathingColorStep").is_none() {
+        if let Some(degrees) = value.get("breathingHueStepDegrees") {
+            let mut degrees = degrees
+                .as_f64()
+                .ok_or("invalid legacy breathing hue step")? as f32;
+            // Preserve the earlier migration of the original 12-degree default.
+            if value
+                .get("breathingDefaultsVersion")
+                .and_then(|version| version.as_u64())
+                .unwrap_or(0)
+                == 0
+                && degrees == 12.0
+            {
+                degrees = 2.0;
+            }
+            value["breathingColorStep"] = color_step_from_degrees(degrees)?.into();
+        }
+    }
+    let mut settings: Settings =
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
     settings.migrate_breathing_defaults();
     settings.canonicalize_identifiers();
     settings.validate()?;
@@ -346,17 +358,14 @@ mod tests {
     fn legacy_breathing_defaults_migrate_to_smoother_values() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        let mut settings = Settings {
-            breathing_pace_seconds: 2.0,
-            breathing_hue_step_degrees: 12.0,
-            breathing_defaults_version: 0,
-            ..Settings::default()
-        };
-        save(&path, &settings).unwrap();
-
-        settings = load(&path).unwrap();
+        fs::write(
+            &path,
+            r#"{"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
         assert_eq!(settings.breathing_pace_seconds, 0.75);
-        assert_eq!(settings.breathing_hue_step_degrees, 2.0);
+        assert_eq!(settings.breathing_color_step, 9);
         assert_eq!(settings.breathing_defaults_version, 1);
     }
 
@@ -364,7 +373,7 @@ mod tests {
     fn breathing_parameters_allow_fine_grained_low_values() {
         let mut settings = Settings {
             breathing_pace_seconds: 0.1,
-            breathing_hue_step_degrees: 0.1,
+            breathing_color_step: 1,
             ..Settings::default()
         };
         assert!(settings.validate().is_ok());
@@ -376,8 +385,61 @@ mod tests {
         settings.breathing_pace_seconds = 2.05;
         assert!(settings.validate().is_err());
         settings.breathing_pace_seconds = 0.1;
-        settings.breathing_hue_step_degrees = 0.05;
+        settings.breathing_color_step = 0;
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn saved_degree_settings_convert_once_and_preserve_custom_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for (degrees, expected) in [(0.1, 1), (2.0, 9), (12.0, 51), (120.0, 510)] {
+            fs::write(
+                &path,
+                serde_json::json!({
+                    "breathingHueStepDegrees": degrees,
+                    "breathingDefaultsVersion": 1,
+                    "breathingPaceSeconds": 1.25
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let settings = load(&path).unwrap();
+            assert_eq!(settings.breathing_color_step, expected);
+            assert_eq!(settings.breathing_pace_seconds, 1.25);
+            save(&path, &settings).unwrap();
+            let saved = fs::read_to_string(&path).unwrap();
+            assert!(!saved.contains("breathingHueStepDegrees"));
+            assert_eq!(load(&path).unwrap(), settings);
+        }
+    }
+
+    #[test]
+    fn integer_color_steps_take_precedence_and_reject_invalid_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"breathingColorStep":1,"breathingHueStepDegrees":12.0}"#,
+        )
+        .unwrap();
+        assert_eq!(load(&path).unwrap().breathing_color_step, 1);
+        for invalid in [0.0, 1.5, 511.0, -1.0] {
+            fs::write(
+                &path,
+                serde_json::json!({"breathingColorStep":invalid}).to_string(),
+            )
+            .unwrap();
+            assert!(load(&path).is_err());
+        }
+        for invalid in [0.05, 121.0] {
+            fs::write(
+                &path,
+                serde_json::json!({"breathingHueStepDegrees":invalid}).to_string(),
+            )
+            .unwrap();
+            assert!(load(&path).is_err());
+        }
     }
 
     #[test]

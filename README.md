@@ -16,7 +16,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
-- Breathing mode with adjustable 0.1–2 second timing and 0.1–120° hue steps, defaulting to 0.75 seconds and 2°
+- Breathing mode with adjustable 0.1–2 second timing and 1–510 integer RGB color steps, defaulting to 0.75 seconds and 9 steps
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -80,9 +80,9 @@ grindlewaldctl party
 grindlewaldctl party --light Bedroom
 grindlewaldctl stop-party
 
-# Slowly breathe between colors; smaller hue steps make each transition subtler
-grindlewaldctl breathe --pace 1 --hue-step 6
-grindlewaldctl breathe --pace 2 --hue-step 18 --light Bedroom
+# Slowly breathe between colors; 1 is the smallest RGB change
+grindlewaldctl breathe --pace 1 --color-step 1
+grindlewaldctl breathe --pace 2 --color-step 77 --light Bedroom
 grindlewaldctl stop-effect
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
@@ -105,7 +105,7 @@ Floodlights offer **Turn on if on home network**, **Turn on**, and **Turn off**.
 
 This check works with Location Services off. It discovers the Wi-Fi interface, reads its own IPv4 default router and ARP entry, and stores a SHA-256 fingerprint of the router’s hardware address in local settings. An empty ARP cache triggers one short probe to the local router. It does not read the SSID, use a public-IP service, or request Location permission. Networks sharing the same router identity count as the same home network; replacing the router requires saving it again. IPv6-only networks are not currently supported. Old SSID-based selections require clicking the option once to save the router. Existing “Do nothing” automations remain unchanged until you choose an option.
 
-An automation may also run a shell command through `/bin/zsh -lc`. For unattended root commands, open **Settings** and install the **Privileged automations** service. macOS asks for administrator authorization once to install a root-owned copy of the Grindlewald helper and its narrowly scoped policy. Grindlewald never receives or stores the password. If the installed service needs an update or repair, the menu bar icon becomes a large bright orange warning triangle and a notice appears at the top of **Control**, with an action button to address it immediately. The normal icon returns after the helper is updated, repaired, or removed.
+An automation may also run a shell command through `/bin/zsh -lc`. For unattended root commands, open **Settings** and install the **Privileged automations** service. macOS asks for administrator authorization once to install a root-owned copy of the Grindlewald helper and its narrowly scoped policy. Grindlewald never receives or stores the password. If the installed service needs an update or repair, the menu bar icon becomes a large bright orange warning triangle and a notice stays pinned at the top of **Control** while scrolling, with an action button to address it immediately. The normal icon returns after the helper is updated, repaired, or removed.
 
 Enable **Run unattended as administrator** on an automation and press **Approve root command**. macOS asks you to approve that exact command, then the helper stores a root-only copy under `/Library/Application Support/Grindlewald/PrivilegedJobs`. At execution time the app sends only the automation's validated ID; it cannot substitute new command text. Editing the command makes the approval stale and prevents it from running as root until you approve it again. Any number of jobs share the same helper, and approvals survive helper updates.
 
@@ -146,7 +146,7 @@ The two profiles deliberately encode white differently:
 - **Classic / H6001:** mode `0x02`, `FF FF FF`, a dedicated-white flag, then the selected white RGB value.
 - **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
 
-The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: each session starts at a random hue, advances by the selected 0.1–120° hue step at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 2° every 0.75 seconds. A smaller hue step makes adjacent updates more alike and takes longer to complete a full color-wheel cycle. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
+The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: each session starts at a random color-wheel position, advances by the selected 1–510 integer RGB steps at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 9 steps every 0.75 seconds. One step changes one RGB channel by exactly 1 on its 0–255 scale, the smallest change the packets can represent. The wheel has 1,530 distinct positions and keeps the same red → yellow → green → cyan → blue → magenta progression. Larger steps skip more positions per update; smaller steps take longer to travel around the wheel. A step may cross a corner and change more than one channel. This preserves the existing RGB progression rather than equalizing perceived color differences. Saved degree settings convert to the nearest integer step, with a minimum of 1 (the old 2° default becomes 9 steps, approximately 2.12°). The maximum of 510 retains the old 120° limit. The CLI still accepts legacy `--hue-step` values and rounds them the same way; use `--color-step` for exact integer control. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
 
 The connection row above every page shows the current Bluetooth link status. Click the **Disconnect** button beside the connection status (also available while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The status returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
 
