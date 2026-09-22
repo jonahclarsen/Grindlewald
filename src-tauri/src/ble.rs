@@ -119,11 +119,16 @@ impl BleController {
             });
         }
 
+        let breathing = matches!(command, ControlCommand::BreathingFrame { .. });
+        let connection_started = std::time::Instant::now();
         self.ensure_connected(&selected).await?;
+        if breathing {
+            crate::timing::record("connection_check", connection_started, None, true);
+        }
         let characteristic_uuid = Uuid::parse_str(CONTROL_CHARACTERISTIC)
             .map_err(|error| format!("invalid control UUID: {error}"))?;
 
-        let writes = selected.iter().map(|device| {
+        let writes = selected.iter().enumerate().map(|(light, device)| {
             let peripheral = self.connections[&normalize(&device.identifier)].clone();
             let key = normalize(&device.identifier);
             let mut next_state = self.light_states.get(&key).cloned().unwrap_or_default();
@@ -141,10 +146,14 @@ impl BleController {
                     })?;
 
                 for frame in frames? {
-                    peripheral
+                    let started = std::time::Instant::now();
+                    let result = peripheral
                         .write(&characteristic, &frame, WriteType::WithoutResponse)
-                        .await
-                        .map_err(|error| format!("{}: {error}", device.name))?;
+                        .await;
+                    if breathing {
+                        crate::timing::record("write", started, Some(light + 1), result.is_ok());
+                    }
+                    result.map_err(|error| format!("{}: {error}", device.name))?;
                 }
                 Ok::<_, String>((device.name.clone(), key, next_state))
             }
@@ -482,6 +491,7 @@ fn frames_for(
         ControlCommand::Party { .. }
         | ControlCommand::Breathe { .. }
         | ControlCommand::SeekBreathing { .. }
+        | ControlCommand::TraceBreathing { .. }
         | ControlCommand::StopParty
         | ControlCommand::StopEffect => {
             Err("effect commands must be resolved before reaching Bluetooth".into())

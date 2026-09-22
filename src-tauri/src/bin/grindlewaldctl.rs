@@ -96,6 +96,11 @@ enum CliCommand {
         #[arg(short, long)]
         light: Option<String>,
     },
+    /// Capture timing from an already-running breathing effect without changing its pace.
+    TraceBreathing {
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(5..=300))]
+        seconds: u32,
+    },
     /// Stop party mode and restore the selected static color.
     StopParty,
     /// Stop any running party or breathing effect.
@@ -166,6 +171,7 @@ async fn main() -> anyhow::Result<()> {
                 device: light,
             }
         }
+        CliCommand::TraceBreathing { seconds } => ControlCommand::TraceBreathing { seconds },
         CliCommand::StopParty => ControlCommand::StopParty,
         CliCommand::StopEffect => ControlCommand::StopEffect,
         CliCommand::Experiment { payload, light } => ControlCommand::Experiment {

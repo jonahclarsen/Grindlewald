@@ -46,6 +46,9 @@ pub enum ControlCommand {
         hue_step_degrees: Option<f32>,
         device: Option<String>,
     },
+    TraceBreathing {
+        seconds: u32,
+    },
     SeekBreathing {
         position: u16,
         #[serde(default)]
@@ -81,7 +84,10 @@ impl ControlCommand {
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
             | Self::Experiment { device, .. } => device.as_deref(),
-            Self::SeekBreathing { .. } | Self::StopParty | Self::StopEffect => None,
+            Self::TraceBreathing { .. }
+            | Self::SeekBreathing { .. }
+            | Self::StopParty
+            | Self::StopEffect => None,
         }
     }
 }

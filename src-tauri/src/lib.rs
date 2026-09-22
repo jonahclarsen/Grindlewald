@@ -7,6 +7,7 @@ pub mod privileged;
 pub mod protocol;
 pub mod settings;
 pub mod state;
+mod timing;
 
 use std::{env, path::PathBuf};
 
@@ -303,6 +304,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 while breathing_frames.changed().await.is_ok() {
                     let frame = breathing_frames.borrow_and_update().clone();
+                    if frame.is_some() {
+                        crate::timing::record("event_emit", std::time::Instant::now(), None, true);
+                    }
                     let _ = playback_handle.emit("breathing-frame", frame);
                 }
             });

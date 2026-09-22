@@ -94,6 +94,7 @@ impl SharedState {
                 .borrow()
                 .as_ref()
                 .map_or(1, |frame| frame.frame_id + 1);
+            crate::timing::record("publish", std::time::Instant::now(), None, true);
             self.breathing_frames.send_replace(Some(BreathingPlayback {
                 position,
                 generation,
@@ -161,6 +162,18 @@ impl SharedState {
     }
 
     async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
+        if let ControlCommand::TraceBreathing { seconds } = &command {
+            if self.current_breathing().is_none() {
+                return Err("Start breathing before capturing timing".into());
+            }
+            return crate::timing::capture(
+                self.settings_path
+                    .parent()
+                    .ok_or("missing settings directory")?,
+                *seconds,
+            )
+            .await;
+        }
         if matches!(&command, ControlCommand::Experiment { device: None, .. }) {
             return Err("experimental commands must target one named light".into());
         }
@@ -347,9 +360,12 @@ impl SharedState {
                     break;
                 }
                 if !moved {
+                    crate::timing::record("timer_lateness", deadline.into_std(), None, true);
                     cycle.advance();
                 }
+                let lock_started = std::time::Instant::now();
                 let mut controller = state.controller.lock().await;
+                crate::timing::record("controller_wait", lock_started, None, true);
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
@@ -372,6 +388,7 @@ impl SharedState {
                     _ = cancelled.changed() => break,
                     result = controller.apply(&settings, &command) => result,
                 };
+                crate::timing::record("apply", started.into_std(), None, result.is_ok());
                 deadline = next_frame_deadline(started, tokio::time::Instant::now(), interval);
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
