@@ -369,6 +369,12 @@ impl SharedState {
     }
 
     async fn run_schedule(&self, schedule: Schedule) -> Result<String, String> {
+        eprintln!(
+            "{} Grindlewald automation started: scheduled time {}, floodlight action {:?}",
+            Local::now().to_rfc3339(),
+            schedule.time,
+            schedule.floodlights
+        );
         let targets = if schedule.lights.is_empty() {
             vec![None]
         } else {
@@ -395,13 +401,30 @@ impl SharedState {
             match schedule.floodlights {
                 FloodlightAction::Unchanged => Ok(None),
                 FloodlightAction::OnHomeNetwork => {
-                    let current = crate::network::home_network_status().await?.fingerprint;
+                    let current = match crate::network::home_network_status().await {
+                        Ok(status) => status.fingerprint,
+                        Err(error) => {
+                            eprintln!(
+                                "{} Grindlewald floodlights skipped: home network lookup failed",
+                                Local::now().to_rfc3339()
+                            );
+                            return Err(error);
+                        }
+                    };
                     if crate::network::matches_saved_network(
                         schedule.floodlight_network.as_deref(),
                         current.as_deref(),
                     ) {
+                        eprintln!(
+                            "{} Grindlewald floodlights allowed: saved home router matched",
+                            Local::now().to_rfc3339()
+                        );
                         crate::run_floodlights(true).await.map(Some)
                     } else {
+                        eprintln!(
+                            "{} Grindlewald floodlights skipped: saved home router not matched",
+                            Local::now().to_rfc3339()
+                        );
                         Ok(Some(
                             "Floodlights skipped: saved home network is not connected".into(),
                         ))
@@ -499,19 +522,18 @@ impl SharedState {
                 triggered.retain(|key| key.starts_with(&today));
 
                 if let Ok(settings) = state.load_settings() {
-                    for schedule in settings
-                        .schedules
-                        .into_iter()
-                        .filter(|schedule| {
-                            schedule.is_enabled_at(now.timestamp_millis()) && schedule.time == minute
-                        })
-                    {
+                    for schedule in settings.schedules.into_iter().filter(|schedule| {
+                        schedule.is_enabled_at(now.timestamp_millis()) && schedule.time == minute
+                    }) {
                         let key = format!("{today}:{}", schedule.id);
                         if triggered.insert(key) {
                             let state = state.clone();
                             tauri::async_runtime::spawn(async move {
                                 if let Err(error) = state.run_schedule(schedule).await {
-                                    eprintln!("Grindlewald schedule failed: {error}");
+                                    eprintln!(
+                                        "{} Grindlewald schedule failed: {error}",
+                                        Local::now().to_rfc3339()
+                                    );
                                 }
                             });
                         }

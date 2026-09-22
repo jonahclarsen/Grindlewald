@@ -1,11 +1,11 @@
 pub mod ble;
 pub mod command;
 pub mod ipc;
+mod network;
 pub mod privileged;
 pub mod protocol;
 pub mod settings;
 pub mod state;
-mod network;
 
 use std::{env, path::PathBuf};
 
@@ -220,6 +220,10 @@ fn floodlight_python_path() -> PathBuf {
 
 async fn run_floodlights(on: bool) -> Result<String, String> {
     let state = if on { "on" } else { "off" };
+    eprintln!(
+        "{} Grindlewald floodlight script starting: {state}",
+        chrono::Local::now().to_rfc3339()
+    );
     let output = tokio::process::Command::new(floodlight_python_path())
         .arg(floodlight_script_path()?)
         .arg(state)
@@ -228,6 +232,10 @@ async fn run_floodlights(on: bool) -> Result<String, String> {
         .map_err(|error| format!("Could not start the floodlight script: {error}"))?;
 
     if output.status.success() {
+        eprintln!(
+            "{} Grindlewald floodlight script completed: {state}",
+            chrono::Local::now().to_rfc3339()
+        );
         Ok(format!("Floodlights {state}"))
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
