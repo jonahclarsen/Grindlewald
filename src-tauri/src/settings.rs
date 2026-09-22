@@ -8,7 +8,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    breathing::{color_step_from_degrees, default_color_step, validate_color_step},
+    breathing::{
+        MAX_COLOR_STEP, color_step_from_degrees, cycle_from_legacy_pace, default_color_step,
+        default_cycle_seconds, frame_interval,
+    },
     protocol::DeviceProfile,
 };
 
@@ -101,8 +104,8 @@ pub struct Settings {
     pub brightness: f32,
     #[serde(default = "default_connection_hold_seconds")]
     pub connection_hold_seconds: u64,
-    #[serde(default = "default_breathing_pace_seconds")]
-    pub breathing_pace_seconds: f32,
+    #[serde(default = "default_cycle_seconds")]
+    pub breathing_cycle_seconds: u32,
     #[serde(default = "default_color_step")]
     pub breathing_color_step: u16,
     #[serde(default)]
@@ -129,10 +132,6 @@ fn default_connection_hold_seconds() -> u64 {
     6
 }
 
-fn default_breathing_pace_seconds() -> f32 {
-    0.75
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -141,9 +140,9 @@ impl Default for Settings {
             white: default_white(),
             brightness: default_brightness(),
             connection_hold_seconds: default_connection_hold_seconds(),
-            breathing_pace_seconds: default_breathing_pace_seconds(),
+            breathing_cycle_seconds: default_cycle_seconds(),
             breathing_color_step: default_color_step(),
-            breathing_defaults_version: 1,
+            breathing_defaults_version: 2,
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -182,18 +181,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-    fn migrate_breathing_defaults(&mut self) {
-        if self.breathing_defaults_version == 0 {
-            if self.breathing_pace_seconds == 2.0 {
-                self.breathing_pace_seconds = default_breathing_pace_seconds();
-            }
-            self.breathing_defaults_version = 1;
-        }
-        if self.breathing_pace_seconds > 2.0 {
-            self.breathing_pace_seconds = 2.0;
-        }
-    }
-
     pub fn canonicalize_identifiers(&mut self) {
         let mut canonical_devices = Vec::new();
         let mut configured_names = HashMap::<String, String>::new();
@@ -224,12 +211,7 @@ impl Settings {
         if !(1..=60).contains(&self.connection_hold_seconds) {
             return Err("connection hold time must be between 1 and 60 seconds".into());
         }
-        if !self.breathing_pace_seconds.is_finite()
-            || !(0.1..=2.0).contains(&self.breathing_pace_seconds)
-        {
-            return Err("breathing pace must be between 0.1 and 2 seconds".into());
-        }
-        validate_color_step(self.breathing_color_step)?;
+        frame_interval(self.breathing_cycle_seconds, self.breathing_color_step)?;
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();
@@ -300,6 +282,12 @@ pub fn load(path: &Path) -> Result<Settings, String> {
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut value: serde_json::Value =
         serde_json::from_str(&contents).map_err(|error| error.to_string())?;
+    if !value.is_object() {
+        return Err("settings must be a JSON object".into());
+    }
+    let has_legacy_breathing = value.get("breathingPaceSeconds").is_some()
+        || value.get("breathingColorStep").is_some()
+        || value.get("breathingHueStepDegrees").is_some();
     if value.get("breathingColorStep").is_none() {
         if let Some(degrees) = value.get("breathingHueStepDegrees") {
             let mut degrees = degrees
@@ -318,9 +306,57 @@ pub fn load(path: &Path) -> Result<Settings, String> {
             value["breathingColorStep"] = color_step_from_degrees(degrees)?.into();
         }
     }
+    // Version 2 replaces per-frame pace with whole-cycle duration and lowers the defaults.
+    if value
+        .get("breathingDefaultsVersion")
+        .and_then(|version| version.as_u64())
+        .unwrap_or(0)
+        < 2
+    {
+        let old_step = value
+            .get("breathingColorStep")
+            .map(|step| step.as_u64().ok_or("invalid breathing color step"))
+            .transpose()?
+            .unwrap_or(1);
+        if !(1..=510).contains(&old_step) {
+            return Err("invalid legacy breathing color step".into());
+        }
+        let color_step = if old_step == 9 {
+            default_color_step()
+        } else {
+            old_step.min(u64::from(MAX_COLOR_STEP)) as u16
+        };
+        value["breathingColorStep"] = color_step.into();
+        if value.get("breathingCycleSeconds").is_none() {
+            let mut pace = value
+                .get("breathingPaceSeconds")
+                .map(|pace| pace.as_f64().ok_or("invalid legacy breathing pace"))
+                .transpose()?
+                .unwrap_or(0.75) as f32;
+            if value
+                .get("breathingDefaultsVersion")
+                .and_then(|version| version.as_u64())
+                .unwrap_or(0)
+                == 0
+                && pace == 2.0
+            {
+                pace = 0.75;
+            }
+            if pace > 2.0 {
+                pace = 2.0;
+            }
+            value["breathingCycleSeconds"] =
+                if pace == 0.75 && (old_step == 9 || !has_legacy_breathing) {
+                    default_cycle_seconds()
+                } else {
+                    cycle_from_legacy_pace(pace, color_step)?
+                }
+                .into();
+        }
+        value["breathingDefaultsVersion"] = 2.into();
+    }
     let mut settings: Settings =
         serde_json::from_value(value).map_err(|error| error.to_string())?;
-    settings.migrate_breathing_defaults();
     settings.canonicalize_identifiers();
     settings.validate()?;
     Ok(settings)
@@ -355,106 +391,68 @@ mod tests {
     }
 
     #[test]
-    fn legacy_breathing_defaults_migrate_to_smoother_values() {
+    fn legacy_defaults_adopt_one_step_and_ten_minute_cycles() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        fs::write(
-            &path,
-            r#"{"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}"#,
-        )
-        .unwrap();
-        let settings = load(&path).unwrap();
-        assert_eq!(settings.breathing_pace_seconds, 0.75);
-        assert_eq!(settings.breathing_color_step, 9);
-        assert_eq!(settings.breathing_defaults_version, 1);
+        for legacy in [
+            serde_json::json!({"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}),
+            serde_json::json!({"breathingPaceSeconds":0.75,"breathingColorStep":9,"breathingDefaultsVersion":1}),
+        ] {
+            fs::write(&path, legacy.to_string()).unwrap();
+            let settings = load(&path).unwrap();
+            assert_eq!(settings.breathing_color_step, 1);
+            assert_eq!(settings.breathing_cycle_seconds, 600);
+            assert_eq!(settings.breathing_defaults_version, 2);
+        }
     }
 
     #[test]
-    fn breathing_parameters_allow_fine_grained_low_values() {
-        let mut settings = Settings {
-            breathing_pace_seconds: 0.1,
-            breathing_color_step: 1,
-            ..Settings::default()
-        };
-        assert!(settings.validate().is_ok());
+    fn legacy_custom_values_migrate_with_new_bounds_and_round_trip() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for (step, pace, expected_step, expected_cycle) in [
+            (1, 0.1, 1, 459),
+            (10, 1.0, 10, 153),
+            (510, 1.25, 100, 20),
+            (1, 2.75, 1, 3060),
+        ] {
+            fs::write(&path, serde_json::json!({"breathingColorStep":step,"breathingPaceSeconds":pace,"breathingDefaultsVersion":1}).to_string()).unwrap();
+            let settings = load(&path).unwrap();
+            assert_eq!(settings.breathing_color_step, expected_step);
+            assert_eq!(settings.breathing_cycle_seconds, expected_cycle);
+            save(&path, &settings).unwrap();
+            assert_eq!(load(&path).unwrap(), settings);
+            let saved = fs::read_to_string(&path).unwrap();
+            assert!(!saved.contains("breathingPaceSeconds"));
+            assert!(!saved.contains("breathingHueStepDegrees"));
+        }
+    }
 
-        settings.breathing_pace_seconds = 0.05;
-        assert!(settings.validate().is_err());
-        settings.breathing_pace_seconds = 2.0;
+    #[test]
+    fn new_cycle_settings_are_preserved_and_invalid_rates_are_rejected() {
+        let mut settings = Settings::default();
         assert!(settings.validate().is_ok());
-        settings.breathing_pace_seconds = 2.05;
+        settings.breathing_cycle_seconds = 458;
         assert!(settings.validate().is_err());
-        settings.breathing_pace_seconds = 0.1;
+        settings.breathing_cycle_seconds = 459;
+        assert!(settings.validate().is_ok());
+        settings.breathing_color_step = 100;
+        settings.breathing_cycle_seconds = 5;
+        assert!(settings.validate().is_ok());
+        settings.breathing_cycle_seconds = 4;
+        assert!(settings.validate().is_err());
+        settings.breathing_cycle_seconds = 3601;
+        assert!(settings.validate().is_err());
+        settings.breathing_cycle_seconds = 600;
+        settings.breathing_color_step = 101;
+        assert!(settings.validate().is_err());
         settings.breathing_color_step = 0;
         assert!(settings.validate().is_err());
-    }
-
-    #[test]
-    fn saved_degree_settings_convert_once_and_preserve_custom_values() {
+        settings.breathing_color_step = 9;
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        for (degrees, expected) in [(0.1, 1), (2.0, 9), (12.0, 51), (120.0, 510)] {
-            fs::write(
-                &path,
-                serde_json::json!({
-                    "breathingHueStepDegrees": degrees,
-                    "breathingDefaultsVersion": 1,
-                    "breathingPaceSeconds": 1.25
-                })
-                .to_string(),
-            )
-            .unwrap();
-            let settings = load(&path).unwrap();
-            assert_eq!(settings.breathing_color_step, expected);
-            assert_eq!(settings.breathing_pace_seconds, 1.25);
-            save(&path, &settings).unwrap();
-            let saved = fs::read_to_string(&path).unwrap();
-            assert!(!saved.contains("breathingHueStepDegrees"));
-            assert_eq!(load(&path).unwrap(), settings);
-        }
-    }
-
-    #[test]
-    fn integer_color_steps_take_precedence_and_reject_invalid_values() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
-        fs::write(
-            &path,
-            r#"{"breathingColorStep":1,"breathingHueStepDegrees":12.0}"#,
-        )
-        .unwrap();
-        assert_eq!(load(&path).unwrap().breathing_color_step, 1);
-        for invalid in [0.0, 1.5, 511.0, -1.0] {
-            fs::write(
-                &path,
-                serde_json::json!({"breathingColorStep":invalid}).to_string(),
-            )
-            .unwrap();
-            assert!(load(&path).is_err());
-        }
-        for invalid in [0.05, 121.0] {
-            fs::write(
-                &path,
-                serde_json::json!({"breathingHueStepDegrees":invalid}).to_string(),
-            )
-            .unwrap();
-            assert!(load(&path).is_err());
-        }
-    }
-
-    #[test]
-    fn loading_clamps_breathing_pace_to_current_maximum() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
-        let settings = Settings {
-            breathing_pace_seconds: 2.75,
-            ..Settings::default()
-        };
-        fs::write(&path, serde_json::to_string(&settings).unwrap()).unwrap();
-
-        let settings = load(&path).unwrap();
-
-        assert_eq!(settings.breathing_pace_seconds, 2.0);
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path).unwrap(), settings);
     }
 
     #[test]

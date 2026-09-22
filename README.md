@@ -16,7 +16,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
-- Breathing mode with adjustable 0.1–2 second timing and 1–510 integer RGB color steps, defaulting to 0.75 seconds and 9 steps
+- Breathing mode with 1–100 integer RGB color steps and a whole-spectrum cycle duration, defaulting to step 1 and 10 minutes; breathing frames stay at least 300 ms apart
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -81,8 +81,8 @@ grindlewaldctl party --light Bedroom
 grindlewaldctl stop-party
 
 # Slowly breathe between colors; 1 is the smallest RGB change
-grindlewaldctl breathe --pace 1 --color-step 1
-grindlewaldctl breathe --pace 2 --color-step 77 --light Bedroom
+grindlewaldctl breathe --cycle-seconds 600 --color-step 1
+grindlewaldctl breathe --cycle-seconds 60 --color-step 10 --light Bedroom
 grindlewaldctl stop-effect
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
@@ -146,7 +146,15 @@ The two profiles deliberately encode white differently:
 - **Classic / H6001:** mode `0x02`, `FF FF FF`, a dedicated-white flag, then the selected white RGB value.
 - **H6005:** mode `0x0D`, RGB, a big-endian Kelvin value, then the same RGB again. The slider covers the captured 2000–9000 K range. This is not interchangeable with the Classic packet: H6005 can acknowledge an old-style packet while ignoring it.
 
-The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode does the opposite: each session starts at a random color-wheel position, advances by the selected 1–510 integer RGB steps at the selected 0.1–2 second pace, and lets the bulb produce its smooth native fade. The defaults are 9 steps every 0.75 seconds. One step changes one RGB channel by exactly 1 on its 0–255 scale, the smallest change the packets can represent. The wheel has 1,530 distinct positions and keeps the same red → yellow → green → cyan → blue → magenta progression. Larger steps skip more positions per update; smaller steps take longer to travel around the wheel. A step may cross a corner and change more than one channel. This preserves the existing RGB progression rather than equalizing perceived color differences. Saved degree settings convert to the nearest integer step, with a minimum of 1 (the old 2° default becomes 9 steps, approximately 2.12°). The maximum of 510 retains the old 120° limit. The CLI still accepts legacy `--hue-step` values and rounds them the same way; use `--color-step` for exact integer control. Classic lights receive the same sequence but may transition more abruptly. Choosing any normal control stops the active effect and restores ordinary control.
+The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode starts at a random color-wheel position and lets the bulb produce its native fade. Classic lights receive the same sequence but may transition more abruptly. Choosing a normal control stops the active effect and restores ordinary control.
+
+**Color step** is an integer from 1 to 100, defaulting to 1. One step changes one RGB channel by exactly 1 on its 0–255 scale. The wheel contains 1,530 distinct positions in the order red → yellow → green → cyan → blue → magenta. Larger steps skip positions. Each lap returns exactly to its initial color; when the step does not divide 1,530, the final step is shorter.
+
+**Full cycle** controls the target time for one complete lap, in whole seconds, defaulting to 10 minutes and allowing up to 60 minutes. For step `s`, the number of updates is `N = ceil(1530 / s)` and the interval is `cycleSeconds / N`. The minimum duration is `ceil(N × 0.3)` seconds: 7m 39s at step 1, 46s at step 10, and 5s at step 100. Reducing the color step raises the selected duration if necessary. Both settings validation and CLI commands enforce this limit. The scheduler accounts for write time and never catches up by sending a burst. Bluetooth stalls or writes near the rate limit can lengthen the actual cycle. The 300 ms floor also applies across breathing restarts; setup packets and ordinary controls are separate from these animation frames.
+
+Older settings migrate automatically: the previous default step 9 becomes 1, steps above 100 clamp to 100, and the old default combination becomes a 10-minute cycle. Custom per-frame timing converts to a whole-cycle duration at the migrated step, rounded up and bounded by the rate limit. The CLI still accepts legacy `--pace` and `--hue-step`; degree steps are rounded and clamped to the new range. New commands use `--cycle-seconds` and `--color-step`.
+
+Timing currently uses equal intervals. [Perceptual timing design](docs/perceptual-timing.md) describes a proposed color-science-based timing model, calculated examples, and the measurements needed to calibrate it for real bulbs.
 
 The connection row above every page shows the current Bluetooth link status. Click the **Disconnect** button beside the connection status (also available while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The status returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
 

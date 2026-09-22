@@ -1,3 +1,4 @@
+import { minimumCycleSeconds, formatCycleSeconds } from "./breathing.js";
 import { createControlQueue } from "./controls.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
@@ -16,8 +17,8 @@ const demoSettings = {
   white: "#ffd5ad",
   brightness: 0.4,
   connectionHoldSeconds: 6,
-  breathingPaceSeconds: 0.75,
-  breathingColorStep: 9,
+  breathingCycleSeconds: 600,
+  breathingColorStep: 1,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -580,16 +581,26 @@ function renderExperimentTargets() {
   $("#experimental-test").disabled = !settings.devices.some((device) => device.enabled);
 }
 
+function renderBreathingControls() {
+  const minimum = minimumCycleSeconds(settings.breathingColorStep);
+  settings.breathingCycleSeconds = Math.max(minimum, settings.breathingCycleSeconds);
+  const cycle = $("#breathing-cycle");
+  cycle.min = minimum;
+  cycle.value = settings.breathingCycleSeconds;
+  cycle.setAttribute("aria-valuetext", formatCycleSeconds(settings.breathingCycleSeconds));
+  cycle.title = `Time for a full spectrum cycle. Minimum ${formatCycleSeconds(minimum)} at this color step.`;
+  $("#breathing-cycle-output").value = formatCycleSeconds(settings.breathingCycleSeconds);
+  $("#breathing-color-step").value = settings.breathingColorStep;
+  $("#breathing-color-step-output").value = String(settings.breathingColorStep);
+}
+
 function renderAll() {
   updateHue(hueFromHex(settings.color), false);
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
-  $("#breathing-pace").value = settings.breathingPaceSeconds;
-  $("#breathing-pace-output").value = `${Number(settings.breathingPaceSeconds).toFixed(2)}s`;
-  $("#breathing-color-step").value = settings.breathingColorStep;
-  $("#breathing-color-step-output").value = String(settings.breathingColorStep);
+  renderBreathingControls();
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -926,7 +937,7 @@ async function toggleEffect(effect) {
           ? { command: "party", device: null }
           : {
               command: "breathe",
-              pace_seconds: settings.breathingPaceSeconds,
+              cycle_seconds: settings.breathingCycleSeconds,
               color_step: settings.breathingColorStep,
               device: null,
             }
@@ -944,11 +955,11 @@ async function toggleEffect(effect) {
 
 $("#party-button").addEventListener("click", () => toggleEffect("party"));
 $("#breathing-button").addEventListener("click", () => toggleEffect("breathe"));
-$("#breathing-pace").addEventListener("input", (event) => {
-  settings.breathingPaceSeconds = Number(event.target.value);
-  $("#breathing-pace-output").value = `${settings.breathingPaceSeconds.toFixed(2)}s`;
+$("#breathing-cycle").addEventListener("input", (event) => {
+  settings.breathingCycleSeconds = Number(event.target.value);
+  renderBreathingControls();
 });
-$("#breathing-pace").addEventListener("change", async () => {
+$("#breathing-cycle").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
     const generation = controlGeneration;
@@ -958,7 +969,7 @@ $("#breathing-pace").addEventListener("change", async () => {
 });
 $("#breathing-color-step").addEventListener("input", (event) => {
   settings.breathingColorStep = Number(event.target.value);
-  $("#breathing-color-step-output").value = String(settings.breathingColorStep);
+  renderBreathingControls();
 });
 $("#breathing-color-step").addEventListener("change", async () => {
   await save();

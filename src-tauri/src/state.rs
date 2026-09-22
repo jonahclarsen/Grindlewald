@@ -13,7 +13,10 @@ use tokio::sync::{Mutex, watch};
 
 use crate::{
     ble::{BleController, DiscoveredDevice},
-    breathing::{COLOR_COUNT, color_at_position, color_step_from_degrees, validate_color_step},
+    breathing::{
+        COLOR_COUNT, ColorCycle, color_at_position, color_step_from_degrees, frame_interval,
+        next_frame_deadline, resolve_cycle_seconds,
+    },
     command::ControlCommand,
     privileged,
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
@@ -113,22 +116,19 @@ impl SharedState {
             return self.start_party(device.clone()).await;
         }
         if let ControlCommand::Breathe {
+            cycle_seconds,
             pace_seconds,
             color_step,
             hue_step_degrees,
             device,
         } = &command
         {
-            return self
-                .start_breathing(
-                    *pace_seconds,
-                    hue_step_degrees
-                        .map(color_step_from_degrees)
-                        .transpose()?
-                        .unwrap_or(*color_step),
-                    device.clone(),
-                )
-                .await;
+            let step = hue_step_degrees
+                .map(color_step_from_degrees)
+                .transpose()?
+                .unwrap_or(*color_step);
+            let cycle = resolve_cycle_seconds(*cycle_seconds, *pace_seconds, step)?;
+            return self.start_breathing(cycle, step, device.clone()).await;
         }
         if matches!(
             command,
@@ -224,14 +224,11 @@ impl SharedState {
 
     async fn start_breathing(
         &self,
-        pace_seconds: f32,
+        cycle_seconds: u32,
         color_step: u16,
         device: Option<String>,
     ) -> Result<String, String> {
-        if !pace_seconds.is_finite() || !(0.1..=2.0).contains(&pace_seconds) {
-            return Err("breathing pace must be between 0.1 and 2 seconds".into());
-        }
-        validate_color_step(color_step)?;
+        let interval = frame_interval(cycle_seconds, color_step)?;
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
         }
@@ -244,7 +241,9 @@ impl SharedState {
                 return Err(error);
             }
         };
-        let mut position = fastrand::u16(0..COLOR_COUNT);
+        let origin = fastrand::u16(0..COLOR_COUNT);
+        let mut cycle = ColorCycle::new(origin, color_step)?;
+        let frame_started = tokio::time::Instant::now();
         if let Err(error) = self
             .controller
             .lock()
@@ -252,7 +251,7 @@ impl SharedState {
             .apply(
                 &settings,
                 &ControlCommand::BreathingFrame {
-                    value: color_at_position(position),
+                    value: color_at_position(origin),
                     device: device.clone(),
                 },
             )
@@ -263,15 +262,21 @@ impl SharedState {
             return Err(error);
         }
 
+        let mut deadline =
+            next_frame_deadline(frame_started, tokio::time::Instant::now(), interval);
         let state = self.clone();
         let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_secs_f32(pace_seconds)).await;
+                tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => break,
+                    _ = tokio::time::sleep_until(deadline) => {},
+                }
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
-                position = (position + color_step) % COLOR_COUNT;
+                let position = cycle.advance();
                 let command = ControlCommand::BreathingFrame {
                     value: color_at_position(position),
                     device: device.clone(),
@@ -280,11 +285,14 @@ impl SharedState {
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
+                let frame_started = tokio::time::Instant::now();
                 let result = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
                     result = controller.apply(&settings, &command) => result,
                 };
+                deadline =
+                    next_frame_deadline(frame_started, tokio::time::Instant::now(), interval);
                 if result.is_err() {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);

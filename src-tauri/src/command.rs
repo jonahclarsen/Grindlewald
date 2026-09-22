@@ -31,7 +31,11 @@ pub enum ControlCommand {
         device: Option<String>,
     },
     Breathe {
-        pace_seconds: f32,
+        #[serde(default)]
+        cycle_seconds: Option<u32>,
+        // Legacy clients express duration per frame; still enforce the 300 ms floor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pace_seconds: Option<f32>,
         #[serde(default = "crate::breathing::default_color_step")]
         color_step: u16,
         // Accept commands from older CLI installations. New clients send color_step.

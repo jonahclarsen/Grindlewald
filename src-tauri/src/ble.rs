@@ -27,6 +27,7 @@ pub struct BleController {
     adapter: Option<Adapter>,
     connections: HashMap<String, Peripheral>,
     light_states: HashMap<String, LightState>,
+    last_breathing_frame_finished: Option<tokio::time::Instant>,
 }
 
 impl Default for BleController {
@@ -41,6 +42,7 @@ impl BleController {
             adapter: None,
             connections: HashMap::new(),
             light_states: HashMap::new(),
+            last_breathing_frame_finished: None,
         }
     }
 
@@ -120,6 +122,12 @@ impl BleController {
         }
 
         self.ensure_connected(&selected).await?;
+        let breathing = matches!(command, ControlCommand::BreathingFrame { .. });
+        if breathing {
+            if let Some(last_frame) = self.last_breathing_frame_finished {
+                tokio::time::sleep_until(last_frame + crate::breathing::MIN_FRAME_INTERVAL).await;
+            }
+        }
         let characteristic_uuid = Uuid::parse_str(CONTROL_CHARACTERISTIC)
             .map_err(|error| format!("invalid control UUID: {error}"))?;
 
@@ -151,6 +159,9 @@ impl BleController {
         });
 
         let results = join_all(writes).await;
+        if breathing {
+            self.last_breathing_frame_finished = Some(tokio::time::Instant::now());
+        }
         let mut changed = Vec::new();
         let mut errors = Vec::new();
         for result in results {

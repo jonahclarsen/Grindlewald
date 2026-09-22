@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use grindlewald_lib::{
-    breathing::{color_step_from_degrees, default_color_step},
+    breathing::{color_step_from_degrees, default_color_step, resolve_cycle_seconds},
     command::{CommandResponse, ControlCommand},
     ipc::socket_path,
 };
@@ -72,12 +72,16 @@ enum CliCommand {
     },
     /// Start a slow color-breathing effect.
     Breathe {
-        #[arg(long, default_value_t = 0.75, value_parser = clap::value_parser!(f32))]
-        pace: f32,
-        /// RGB steps along the color wheel per update (1-510); 1 is the smallest change.
-        #[arg(long, default_value_t = default_color_step(), value_parser = clap::value_parser!(u16).range(1..=510))]
+        /// Seconds for one full spectrum cycle (default 600; minimum depends on color step).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=3600))]
+        cycle_seconds: Option<u32>,
+        /// Legacy seconds per frame; converted to a cycle with a 300 ms minimum interval.
+        #[arg(long, conflicts_with = "cycle_seconds", value_parser = clap::value_parser!(f32))]
+        pace: Option<f32>,
+        /// RGB steps along the color wheel per update (1-100); 1 is the smallest change.
+        #[arg(long, default_value_t = default_color_step(), value_parser = clap::value_parser!(u16).range(1..=100))]
         color_step: u16,
-        /// Legacy degrees per update (0.1-120), rounded to the nearest RGB step.
+        /// Legacy degrees per update (0.1-120), rounded and clamped to 1-100 RGB steps.
         #[arg(long, conflicts_with = "color_step", value_parser = parse_hue_step)]
         hue_step: Option<u16>,
         #[arg(short, long)]
@@ -133,16 +137,24 @@ async fn main() -> anyhow::Result<()> {
         },
         CliCommand::Party { light } => ControlCommand::Party { device: light },
         CliCommand::Breathe {
+            cycle_seconds,
             pace,
             color_step,
             hue_step,
             light,
-        } => ControlCommand::Breathe {
-            pace_seconds: pace,
-            color_step: hue_step.unwrap_or(color_step),
-            hue_step_degrees: None,
-            device: light,
-        },
+        } => {
+            let color_step = hue_step.unwrap_or(color_step);
+            ControlCommand::Breathe {
+                cycle_seconds: Some(
+                    resolve_cycle_seconds(cycle_seconds, pace, color_step)
+                        .map_err(anyhow::Error::msg)?,
+                ),
+                pace_seconds: None,
+                color_step,
+                hue_step_degrees: None,
+                device: light,
+            }
+        }
         CliCommand::StopParty => ControlCommand::StopParty,
         CliCommand::StopEffect => ControlCommand::StopEffect,
         CliCommand::Experiment { payload, light } => ControlCommand::Experiment {
@@ -180,11 +192,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cycle_cli_accepts_whole_seconds_and_rejects_conflicting_legacy_pace() {
+        let cli = Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", "600"]).unwrap();
+        let CliCommand::Breathe {
+            cycle_seconds,
+            pace,
+            color_step,
+            ..
+        } = cli.command
+        else {
+            panic!("expected breathe")
+        };
+        assert_eq!(
+            resolve_cycle_seconds(cycle_seconds, pace, color_step).unwrap(),
+            600
+        );
+        for invalid in ["0", "3601", "4.8", "-1"] {
+            assert!(Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", invalid]).is_err());
+        }
+        assert!(
+            Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", "600", "--pace", "1"])
+                .is_err()
+        );
+    }
+
+    #[test]
     fn breathing_cli_accepts_integer_steps_and_converts_legacy_degrees() {
         for (args, expected) in [
-            (vec!["ctl", "breathe"], 9),
+            (vec!["ctl", "breathe"], 1),
             (vec!["ctl", "breathe", "--color-step", "1"], 1),
-            (vec!["ctl", "breathe", "--color-step", "510"], 510),
+            (vec!["ctl", "breathe", "--color-step", "100"], 100),
             (vec!["ctl", "breathe", "--hue-step", "2"], 9),
             (vec!["ctl", "breathe", "--hue-step", "0.1"], 1),
         ] {
@@ -199,7 +236,7 @@ mod tests {
             };
             assert_eq!(hue_step.unwrap_or(color_step), expected);
         }
-        for invalid in ["0", "511", "1.5", "-1"] {
+        for invalid in ["0", "101", "1.5", "-1"] {
             assert!(Cli::try_parse_from(["ctl", "breathe", "--color-step", invalid]).is_err());
         }
         assert!(
