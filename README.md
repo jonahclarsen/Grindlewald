@@ -16,7 +16,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
-- Breathing mode with 1–100 integer RGB color steps and a whole-spectrum cycle duration, defaulting to step 1 and 10 minutes; perceptual timing and brightness compensation
+- Breathing mode with 1–100 integer RGB color steps and a fixed 250–1,000 ms interval in 50 ms increments; defaults to step 1 and 400 ms
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -81,8 +81,8 @@ grindlewaldctl party --light Bedroom
 grindlewaldctl stop-party
 
 # Slowly breathe between colors; 1 is the smallest RGB change
-grindlewaldctl breathe --cycle-seconds 600 --color-step 1
-grindlewaldctl breathe --cycle-seconds 60 --color-step 10 --light Bedroom
+grindlewaldctl breathe --interval-ms 400 --color-step 1
+grindlewaldctl breathe --interval-ms 250 --color-step 10 --light Bedroom
 grindlewaldctl stop-effect
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
@@ -148,15 +148,13 @@ The two profiles deliberately encode white differently:
 
 The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its instant `0x05` music stream once and then sends rainbow frames locally. Breathing mode starts at a random color-wheel position and lets the bulb produce its native fade. Classic lights receive the same sequence but may transition more abruptly. Choosing a normal control stops the active effect and restores ordinary control.
 
-**Color step** is an integer from 1 to 100, defaulting to 1. One step changes one RGB channel by exactly 1 on its 0–255 scale. The wheel contains 1,530 distinct positions in the order red → yellow → green → cyan → blue → magenta. Larger steps skip positions. Each lap returns exactly to its initial color; when the step does not divide 1,530, the final step is shorter.
+**Color step** is an integer from 1 to 100, defaulting to 1. One step changes one RGB channel by exactly 1 on its 0–255 scale. The wheel contains 1,530 distinct positions in the order red → yellow → green → cyan → blue → magenta. Each update advances exactly the selected number of positions, wrapping around without shortening the step at the end of a lap.
 
-**Full cycle** controls the target time for one complete lap, in whole seconds, defaulting to 10 minutes and allowing up to 60 minutes. For step `s`, the number of updates is `N = ceil(1530 / s)` and the average interval is `cycleSeconds / N`. The minimum duration is `ceil(N × 0.3)` seconds: 7m 39s at step 1, 46s at step 10, and 5s at step 100. When Full cycle is at its minimum, changing Color step keeps it at the new minimum. Otherwise the selected duration is retained unless the new minimum requires a longer cycle. These duration bounds remain enforced in settings and the CLI, but individual perceptually weighted intervals can be shorter than 300 ms. Slow Bluetooth writes can lengthen an actual cycle; writes remain serialized instead of accumulating an overdue queue.
+**Step interval** is the time between updates: 250–1,000 milliseconds in increments of 50, defaulting to 400 ms. Every hue uses the same interval, independent of Color step. Brightness stays at the selected level. Slow Bluetooth writes can lengthen the interval; writes remain serialized without accumulating catch-up commands.
 
-Older settings migrate automatically: the previous default step 9 becomes 1, steps above 100 clamp to 100, and the old default combination becomes a 10-minute cycle. Custom per-frame timing converts to a whole-cycle duration at the migrated step, rounded up and bounded by the minimum cycle duration. The CLI still accepts legacy `--pace` and `--hue-step`; degree steps are rounded and clamped to the new range. New commands use `--cycle-seconds` and `--color-step`.
+Older full-cycle settings migrate to their average interval (`cycleSeconds × 1000 / ceil(1530 / colorStep)`), rounded to the nearest 50 ms and clamped to the new range. Older per-step settings are rounded and clamped too. New CLI commands use `--interval-ms` and `--color-step`; `--pace` still accepts seconds within the same bounds and increments. Legacy `--cycle-seconds` commands convert to a supported interval, and `--hue-step` converts degrees to integer RGB steps.
 
-Breathing now allocates time in proportion to Oklab color distance, using an explicit sRGB/linear-brightness approximation and the actual quantized brightness values sent to the lights. Darker-looking colors receive a brightness boost toward the modeled lightness of yellow, capped at 100% and never below the selected brightness packet. At 100%, every color remains at 100%; equal lightness is then impossible without dimming. Brightness packets are sent only when their 8-bit value changes, plus required synchronization. Stopping breathing restores the selected static brightness.
-
-The normal Color hue slider and swatch show the last successfully sent breathing color. Dragging or using its arrow keys seeks within the running effect, immediately applies the latest requested hue after any in-flight write, and continues breathing from there. The selected static color is retained for when breathing stops. [Perceptual timing and brightness models](docs/perceptual-timing.md) documents the implemented equations, scientific sources, exact peak update rates, calibration assumptions, and validation.
+The normal Color hue slider and swatch show the last successfully sent breathing color. Dragging or using its arrow keys seeks within the running effect, applies the latest requested hue after any in-flight write, and continues the fixed-step sequence from there. The selected static color is retained for when breathing stops.
 
 The connection row above every page shows the current Bluetooth link status. Click the **Disconnect** button beside the connection status (also available while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The status returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
 

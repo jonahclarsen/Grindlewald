@@ -14,8 +14,8 @@ use tokio::sync::{Mutex, watch};
 use crate::{
     ble::{BleController, DiscoveredDevice},
     breathing::{
-        COLOR_COUNT, PerceptualCycle, PerceptualFrame, color_at_position, color_step_from_degrees,
-        next_frame_deadline, resolve_cycle_seconds,
+        COLOR_COUNT, ColorCycle, color_at_position, color_step_from_degrees, frame_interval,
+        next_frame_deadline, resolve_interval_ms,
     },
     command::ControlCommand,
     privileged,
@@ -34,7 +34,6 @@ pub struct ConnectionStatus {
 #[serde(rename_all = "camelCase")]
 pub struct BreathingPlayback {
     pub position: u16,
-    pub brightness: f32,
     pub generation: u64,
     pub request_id: u64,
     pub frame_id: u64,
@@ -86,7 +85,7 @@ impl SharedState {
         })
     }
 
-    fn publish_breathing(&self, frame: &PerceptualFrame, generation: u64, request_id: u64) {
+    fn publish_breathing(&self, position: u16, generation: u64, request_id: u64) {
         if self.party_active.load(Ordering::SeqCst)
             && self.party_generation.load(Ordering::SeqCst) == generation
         {
@@ -96,8 +95,7 @@ impl SharedState {
                 .as_ref()
                 .map_or(1, |frame| frame.frame_id + 1);
             self.breathing_frames.send_replace(Some(BreathingPlayback {
-                position: frame.position,
-                brightness: f32::from(frame.brightness) / 255.0,
+                position,
                 generation,
                 request_id,
                 frame_id,
@@ -186,6 +184,7 @@ impl SharedState {
             return self.start_party(device.clone()).await;
         }
         if let ControlCommand::Breathe {
+            interval_ms,
             cycle_seconds,
             pace_seconds,
             color_step,
@@ -197,8 +196,8 @@ impl SharedState {
                 .map(color_step_from_degrees)
                 .transpose()?
                 .unwrap_or(*color_step);
-            let cycle = resolve_cycle_seconds(*cycle_seconds, *pace_seconds, step)?;
-            return self.start_breathing(cycle, step, device.clone()).await;
+            let interval = resolve_interval_ms(*interval_ms, *pace_seconds, *cycle_seconds, step)?;
+            return self.start_breathing(interval, step, device.clone()).await;
         }
         if matches!(
             command,
@@ -298,23 +297,21 @@ impl SharedState {
 
     async fn start_breathing(
         &self,
-        cycle_seconds: u32,
+        interval_ms: u32,
         color_step: u16,
         device: Option<String>,
     ) -> Result<String, String> {
         let settings = self.load_settings()?;
         let origin = fastrand::u16(0..COLOR_COUNT);
-        let mut cycle =
-            PerceptualCycle::new(origin, color_step, cycle_seconds, settings.brightness)?;
+        let mut cycle = ColorCycle::new(origin, color_step)?;
+        let interval = frame_interval(interval_ms)?;
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("An effect is already running".into());
         }
         let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let mut seek = self.breathing_seek.subscribe();
-        let mut index = 0;
         let mut request_id = 0;
-        let first = &cycle.frames[0];
         let result = self
             .controller
             .lock()
@@ -322,8 +319,7 @@ impl SharedState {
             .apply(
                 &settings,
                 &ControlCommand::BreathingFrame {
-                    value: color_at_position(first.position),
-                    brightness: Some(f32::from(first.brightness) / 255.0),
+                    value: color_at_position(cycle.position),
                     device: device.clone(),
                 },
             )
@@ -334,9 +330,9 @@ impl SharedState {
             self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
-        self.publish_breathing(first, generation, request_id);
+        self.publish_breathing(cycle.position, generation, request_id);
         // Connection setup is not part of the first color interval.
-        let mut deadline = tokio::time::Instant::now() + first.interval;
+        let mut deadline = tokio::time::Instant::now() + interval;
         let state = self.clone();
         let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
@@ -351,7 +347,7 @@ impl SharedState {
                     break;
                 }
                 if !moved {
-                    index = (index + 1) % cycle.frames.len();
+                    cycle.advance();
                 }
                 let mut controller = state.controller.lock().await;
                 if state.party_generation.load(Ordering::SeqCst) != generation {
@@ -362,21 +358,12 @@ impl SharedState {
                 if moved || seek.has_changed().unwrap_or(false) {
                     let latest = *seek.borrow_and_update();
                     if let Some(latest) = latest.filter(|seek| seek.generation == generation) {
-                        cycle = PerceptualCycle::new(
-                            latest.position,
-                            color_step,
-                            cycle_seconds,
-                            settings.brightness,
-                        )
-                        .expect("running breathing parameters remain valid");
-                        index = 0;
+                        cycle.position = latest.position;
                         request_id = latest.request_id;
                     }
                 }
-                let frame = &cycle.frames[index];
                 let command = ControlCommand::BreathingFrame {
-                    value: color_at_position(frame.position),
-                    brightness: Some(f32::from(frame.brightness) / 255.0),
+                    value: color_at_position(cycle.position),
                     device: device.clone(),
                 };
                 let started = tokio::time::Instant::now();
@@ -385,8 +372,7 @@ impl SharedState {
                     _ = cancelled.changed() => break,
                     result = controller.apply(&settings, &command) => result,
                 };
-                deadline =
-                    next_frame_deadline(started, tokio::time::Instant::now(), frame.interval);
+                deadline = next_frame_deadline(started, tokio::time::Instant::now(), interval);
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
@@ -397,7 +383,7 @@ impl SharedState {
                     state.arm_idle_disconnect(settings.connection_hold_seconds);
                     break;
                 }
-                state.publish_breathing(frame, generation, request_id);
+                state.publish_breathing(cycle.position, generation, request_id);
             }
         });
         Ok("Breathing".into())
@@ -706,8 +692,7 @@ mod tests {
 
     #[tokio::test]
     async fn seeking_updates_the_running_effect_without_stopping_or_loading_settings() {
-        use crate::{breathing::PerceptualFrame, command::ControlCommand};
-        use std::time::Duration;
+        use crate::command::ControlCommand;
         let directory = tempfile::tempdir().unwrap();
         let state = SharedState::new(directory.path().join("missing-settings.json"));
         assert!(
@@ -721,15 +706,7 @@ mod tests {
         );
         state.party_active.store(true, Ordering::SeqCst);
         state.party_generation.store(7, Ordering::SeqCst);
-        state.publish_breathing(
-            &PerceptualFrame {
-                position: 0,
-                brightness: 255,
-                interval: Duration::from_secs(1),
-            },
-            7,
-            0,
-        );
+        state.publish_breathing(0, 7, 0);
         let mut seek = state.breathing_seek.subscribe();
         for (position, request_id) in [(100, 1), (765, 2), (1529, 3)] {
             state

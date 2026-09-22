@@ -32,8 +32,11 @@ pub enum ControlCommand {
     },
     Breathe {
         #[serde(default)]
+        interval_ms: Option<u32>,
+        // Older clients may still send a full-cycle duration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         cycle_seconds: Option<u32>,
-        // Legacy clients express average duration per frame; preserve cycle bounds.
+        // Legacy seconds format for the fixed interval.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pace_seconds: Option<f32>,
         #[serde(default = "crate::breathing::default_color_step")]
@@ -57,8 +60,6 @@ pub enum ControlCommand {
     },
     BreathingFrame {
         value: String,
-        #[serde(default)]
-        brightness: Option<f32>,
         device: Option<String>,
     },
     Experiment {

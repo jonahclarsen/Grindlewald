@@ -1,4 +1,3 @@
-import { minimumCycleSeconds, formatCycleSeconds, cycleSecondsAfterStepChange } from "./breathing.js";
 import { createControlQueue } from "./controls.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
@@ -17,7 +16,7 @@ const demoSettings = {
   white: "#ffd5ad",
   brightness: 0.4,
   connectionHoldSeconds: 6,
-  breathingCycleSeconds: 600,
+  breathingIntervalMs: 400,
   breathingColorStep: 1,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
@@ -628,14 +627,11 @@ function renderExperimentTargets() {
 }
 
 function renderBreathingControls() {
-  const minimum = minimumCycleSeconds(settings.breathingColorStep);
-  settings.breathingCycleSeconds = Math.max(minimum, settings.breathingCycleSeconds);
-  const cycle = $("#breathing-cycle");
-  cycle.min = minimum;
-  cycle.value = settings.breathingCycleSeconds;
-  cycle.setAttribute("aria-valuetext", formatCycleSeconds(settings.breathingCycleSeconds));
-  cycle.title = `Time for a full spectrum cycle. Minimum ${formatCycleSeconds(minimum)} at this color step.`;
-  $("#breathing-cycle-output").value = formatCycleSeconds(settings.breathingCycleSeconds);
+  const interval = $("#breathing-interval");
+  interval.value = settings.breathingIntervalMs;
+  const label = `${settings.breathingIntervalMs} ms`;
+  interval.setAttribute("aria-valuetext", label);
+  $("#breathing-interval-output").value = label;
   $("#breathing-color-step").value = settings.breathingColorStep;
   $("#breathing-color-step-output").value = String(settings.breathingColorStep);
 }
@@ -990,7 +986,7 @@ async function toggleEffect(effect) {
           ? { command: "party", device: null }
           : {
               command: "breathe",
-              cycle_seconds: settings.breathingCycleSeconds,
+              interval_ms: settings.breathingIntervalMs,
               color_step: settings.breathingColorStep,
               device: null,
             }
@@ -1008,11 +1004,11 @@ async function toggleEffect(effect) {
 
 $("#party-button").addEventListener("click", () => toggleEffect("party"));
 $("#breathing-button").addEventListener("click", () => toggleEffect("breathe"));
-$("#breathing-cycle").addEventListener("input", (event) => {
-  settings.breathingCycleSeconds = Number(event.target.value);
+$("#breathing-interval").addEventListener("input", (event) => {
+  settings.breathingIntervalMs = Number(event.target.value);
   renderBreathingControls();
 });
-$("#breathing-cycle").addEventListener("change", async () => {
+$("#breathing-interval").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
     const generation = controlGeneration;
@@ -1022,7 +1018,6 @@ $("#breathing-cycle").addEventListener("change", async () => {
 });
 $("#breathing-color-step").addEventListener("input", (event) => {
   const nextStep = Number(event.target.value);
-  settings.breathingCycleSeconds = cycleSecondsAfterStepChange(settings.breathingCycleSeconds, settings.breathingColorStep, nextStep);
   settings.breathingColorStep = nextStep;
   renderBreathingControls();
 });

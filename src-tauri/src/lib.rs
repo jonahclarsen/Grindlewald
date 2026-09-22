@@ -3,7 +3,6 @@ pub mod breathing;
 pub mod command;
 pub mod ipc;
 mod network;
-pub mod perceptual;
 pub mod privileged;
 pub mod protocol;
 pub mod settings;

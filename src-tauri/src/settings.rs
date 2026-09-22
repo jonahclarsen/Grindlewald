@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     breathing::{
-        MAX_COLOR_STEP, average_frame_interval, color_step_from_degrees, cycle_from_legacy_pace,
-        default_color_step, default_cycle_seconds,
+        COLOR_COUNT, MAX_COLOR_STEP, color_step_from_degrees, default_color_step,
+        default_interval_ms, frame_interval, rounded_interval_ms, validate_color_step,
     },
     protocol::DeviceProfile,
 };
@@ -104,8 +104,8 @@ pub struct Settings {
     pub brightness: f32,
     #[serde(default = "default_connection_hold_seconds")]
     pub connection_hold_seconds: u64,
-    #[serde(default = "default_cycle_seconds")]
-    pub breathing_cycle_seconds: u32,
+    #[serde(default = "default_interval_ms")]
+    pub breathing_interval_ms: u32,
     #[serde(default = "default_color_step")]
     pub breathing_color_step: u16,
     #[serde(default)]
@@ -140,9 +140,9 @@ impl Default for Settings {
             white: default_white(),
             brightness: default_brightness(),
             connection_hold_seconds: default_connection_hold_seconds(),
-            breathing_cycle_seconds: default_cycle_seconds(),
+            breathing_interval_ms: default_interval_ms(),
             breathing_color_step: default_color_step(),
-            breathing_defaults_version: 2,
+            breathing_defaults_version: 3,
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -211,7 +211,8 @@ impl Settings {
         if !(1..=60).contains(&self.connection_hold_seconds) {
             return Err("connection hold time must be between 1 and 60 seconds".into());
         }
-        average_frame_interval(self.breathing_cycle_seconds, self.breathing_color_step)?;
+        frame_interval(self.breathing_interval_ms)?;
+        validate_color_step(self.breathing_color_step)?;
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();
@@ -285,9 +286,6 @@ pub fn load(path: &Path) -> Result<Settings, String> {
     if !value.is_object() {
         return Err("settings must be a JSON object".into());
     }
-    let has_legacy_breathing = value.get("breathingPaceSeconds").is_some()
-        || value.get("breathingColorStep").is_some()
-        || value.get("breathingHueStepDegrees").is_some();
     if value.get("breathingColorStep").is_none() {
         if let Some(degrees) = value.get("breathingHueStepDegrees") {
             let mut degrees = degrees
@@ -306,54 +304,43 @@ pub fn load(path: &Path) -> Result<Settings, String> {
             value["breathingColorStep"] = color_step_from_degrees(degrees)?.into();
         }
     }
-    // Version 2 replaces per-frame pace with whole-cycle duration and lowers the defaults.
-    if value
+    let version = value
         .get("breathingDefaultsVersion")
         .and_then(|version| version.as_u64())
-        .unwrap_or(0)
-        < 2
-    {
+        .unwrap_or(0);
+    if version < 3 {
         let old_step = value
             .get("breathingColorStep")
             .map(|step| step.as_u64().ok_or("invalid breathing color step"))
             .transpose()?
             .unwrap_or(1);
-        if !(1..=510).contains(&old_step) {
+        if !(1..=if version < 2 { 510 } else { 100 }).contains(&old_step) {
             return Err("invalid legacy breathing color step".into());
         }
-        let color_step = if old_step == 9 {
+        let color_step = if version < 2 && old_step == 9 {
             default_color_step()
         } else {
             old_step.min(u64::from(MAX_COLOR_STEP)) as u16
         };
         value["breathingColorStep"] = color_step.into();
-        if value.get("breathingCycleSeconds").is_none() {
-            let mut pace = value
-                .get("breathingPaceSeconds")
-                .map(|pace| pace.as_f64().ok_or("invalid legacy breathing pace"))
-                .transpose()?
-                .unwrap_or(0.75) as f32;
-            if value
-                .get("breathingDefaultsVersion")
-                .and_then(|version| version.as_u64())
-                .unwrap_or(0)
-                == 0
-                && pace == 2.0
-            {
-                pace = 0.75;
-            }
-            if pace > 2.0 {
-                pace = 2.0;
-            }
-            value["breathingCycleSeconds"] =
-                if pace == 0.75 && (old_step == 9 || !has_legacy_breathing) {
-                    default_cycle_seconds()
+        if value.get("breathingIntervalMs").is_none() {
+            let milliseconds = if let Some(cycle) = value.get("breathingCycleSeconds") {
+                cycle.as_f64().ok_or("invalid legacy breathing cycle")? * 1000.0
+                    / f64::from(COLOR_COUNT.div_ceil(color_step))
+            } else if let Some(pace) = value.get("breathingPaceSeconds") {
+                let pace = pace.as_f64().ok_or("invalid legacy breathing pace")?;
+                // Retain the original default migration from 2s to 750ms.
+                if version == 0 && pace == 2.0 {
+                    750.0
                 } else {
-                    cycle_from_legacy_pace(pace, color_step)?
+                    pace * 1000.0
                 }
-                .into();
+            } else {
+                f64::from(default_interval_ms())
+            };
+            value["breathingIntervalMs"] = rounded_interval_ms(milliseconds)?.into();
         }
-        value["breathingDefaultsVersion"] = 2.into();
+        value["breathingDefaultsVersion"] = 3.into();
     }
     let mut settings: Settings =
         serde_json::from_value(value).map_err(|error| error.to_string())?;
@@ -391,68 +378,102 @@ mod tests {
     }
 
     #[test]
-    fn legacy_defaults_adopt_one_step_and_ten_minute_cycles() {
+    fn legacy_values_migrate_to_fixed_intervals_and_round_trip() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        for legacy in [
-            serde_json::json!({"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}),
-            serde_json::json!({"breathingPaceSeconds":0.75,"breathingColorStep":9,"breathingDefaultsVersion":1}),
+        for (legacy, step, interval) in [
+            (serde_json::json!({}), 1, 400),
+            (
+                serde_json::json!({"breathingPaceSeconds":2.0,"breathingHueStepDegrees":12.0}),
+                1,
+                750,
+            ),
+            (
+                serde_json::json!({"breathingPaceSeconds":0.75,"breathingColorStep":9,"breathingDefaultsVersion":1}),
+                1,
+                750,
+            ),
+            (
+                serde_json::json!({"breathingPaceSeconds":0.1,"breathingColorStep":1,"breathingDefaultsVersion":1}),
+                1,
+                250,
+            ),
+            (
+                serde_json::json!({"breathingPaceSeconds":1.25,"breathingColorStep":510,"breathingDefaultsVersion":1}),
+                100,
+                1000,
+            ),
+            (
+                serde_json::json!({"breathingCycleSeconds":600,"breathingColorStep":1,"breathingDefaultsVersion":2}),
+                1,
+                400,
+            ),
+            (
+                serde_json::json!({"breathingCycleSeconds":459,"breathingColorStep":1,"breathingDefaultsVersion":2}),
+                1,
+                300,
+            ),
+            (
+                serde_json::json!({"breathingCycleSeconds":5,"breathingColorStep":100,"breathingDefaultsVersion":2}),
+                100,
+                300,
+            ),
+            (
+                serde_json::json!({"breathingCycleSeconds":3600,"breathingColorStep":100,"breathingDefaultsVersion":2}),
+                100,
+                1000,
+            ),
+            (
+                serde_json::json!({"breathingIntervalMs":250,"breathingColorStep":9,"breathingDefaultsVersion":3}),
+                9,
+                250,
+            ),
         ] {
             fs::write(&path, legacy.to_string()).unwrap();
             let settings = load(&path).unwrap();
-            assert_eq!(settings.breathing_color_step, 1);
-            assert_eq!(settings.breathing_cycle_seconds, 600);
-            assert_eq!(settings.breathing_defaults_version, 2);
-        }
-    }
-
-    #[test]
-    fn legacy_custom_values_migrate_with_new_bounds_and_round_trip() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("settings.json");
-        for (step, pace, expected_step, expected_cycle) in [
-            (1, 0.1, 1, 459),
-            (10, 1.0, 10, 153),
-            (510, 1.25, 100, 20),
-            (1, 2.75, 1, 3060),
-        ] {
-            fs::write(&path, serde_json::json!({"breathingColorStep":step,"breathingPaceSeconds":pace,"breathingDefaultsVersion":1}).to_string()).unwrap();
-            let settings = load(&path).unwrap();
-            assert_eq!(settings.breathing_color_step, expected_step);
-            assert_eq!(settings.breathing_cycle_seconds, expected_cycle);
+            assert_eq!(settings.breathing_color_step, step);
+            assert_eq!(settings.breathing_interval_ms, interval);
+            assert_eq!(settings.breathing_defaults_version, 3);
             save(&path, &settings).unwrap();
             assert_eq!(load(&path).unwrap(), settings);
             let saved = fs::read_to_string(&path).unwrap();
-            assert!(!saved.contains("breathingPaceSeconds"));
-            assert!(!saved.contains("breathingHueStepDegrees"));
+            for obsolete in [
+                "breathingPaceSeconds",
+                "breathingHueStepDegrees",
+                "breathingCycleSeconds",
+            ] {
+                assert!(!saved.contains(obsolete));
+            }
         }
     }
 
     #[test]
-    fn new_cycle_settings_are_preserved_and_invalid_rates_are_rejected() {
+    fn fixed_intervals_validate_independently_of_color_step() {
         let mut settings = Settings::default();
-        assert!(settings.validate().is_ok());
-        settings.breathing_cycle_seconds = 458;
-        assert!(settings.validate().is_err());
-        settings.breathing_cycle_seconds = 459;
-        assert!(settings.validate().is_ok());
-        settings.breathing_color_step = 100;
-        settings.breathing_cycle_seconds = 5;
-        assert!(settings.validate().is_ok());
-        settings.breathing_cycle_seconds = 4;
-        assert!(settings.validate().is_err());
-        settings.breathing_cycle_seconds = 3601;
-        assert!(settings.validate().is_err());
-        settings.breathing_cycle_seconds = 600;
-        settings.breathing_color_step = 101;
-        assert!(settings.validate().is_err());
-        settings.breathing_color_step = 0;
-        assert!(settings.validate().is_err());
-        settings.breathing_color_step = 9;
+        for step in 1..=100 {
+            settings.breathing_color_step = step;
+            for interval in (250..=1000).step_by(50) {
+                settings.breathing_interval_ms = interval;
+                assert!(settings.validate().is_ok());
+            }
+        }
+        for interval in [0, 249, 251, 999, 1001] {
+            settings.breathing_interval_ms = interval;
+            assert!(settings.validate().is_err());
+        }
+        settings.breathing_interval_ms = 400;
+        for step in [0, 101] {
+            settings.breathing_color_step = step;
+            assert!(settings.validate().is_err());
+        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        save(&path, &settings).unwrap();
-        assert_eq!(load(&path).unwrap(), settings);
+        fs::write(
+            &path,
+            r#"{"breathingDefaultsVersion":3,"breathingIntervalMs":275}"#,
+        )
+        .unwrap();
+        assert!(load(&path).is_err());
     }
 
     #[test]

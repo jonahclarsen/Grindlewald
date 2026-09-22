@@ -333,7 +333,6 @@ impl BleController {
 struct LightState {
     color: Option<[u8; 20]>,
     brightness: Option<f32>,
-    breathing_brightness: Option<u8>,
     needs_sync: bool,
 }
 
@@ -342,7 +341,6 @@ impl Default for LightState {
         Self {
             color: None,
             brightness: None,
-            breathing_brightness: None,
             needs_sync: true,
         }
     }
@@ -362,19 +360,16 @@ impl LightState {
                     .or(self.brightness)
                     .unwrap_or(settings.brightness);
                 frames.truncate(1);
-                if self.needs_sync
-                    || self.breathing_brightness.is_some()
-                    || brightness.is_some_and(|value| Some(value) != self.brightness)
+                if self.needs_sync || brightness.is_some_and(|value| Some(value) != self.brightness)
                 {
                     frames.push(brightness_frame(desired)?);
                 }
                 self.color = Some(frames[0]);
                 self.brightness = Some(desired);
                 self.needs_sync = false;
-                self.breathing_brightness = None;
             }
             ControlCommand::Brightness { value, .. } => {
-                if self.needs_sync || self.breathing_brightness.is_some() {
+                if self.needs_sync {
                     let color = match self.color {
                         Some(color) => color,
                         None => color_frame(profile, parse_hex_color(&settings.color)?),
@@ -384,29 +379,15 @@ impl LightState {
                 }
                 self.brightness = Some(*value);
                 self.needs_sync = false;
-                self.breathing_brightness = None;
             }
-            ControlCommand::BreathingFrame { brightness, .. } => {
-                let desired = brightness.unwrap_or(settings.brightness);
-                let packet = brightness_frame(desired)?;
-                let applied = self
-                    .breathing_brightness
-                    .or(self.brightness.map(|value| (value * 255.0).round() as u8));
-                frames.truncate(1);
-                if self.needs_sync || applied != Some(packet[2]) {
-                    frames.push(packet);
+            ControlCommand::BreathingFrame { .. } => {
+                if self.needs_sync || self.brightness != Some(settings.brightness) {
+                    frames.push(brightness_frame(settings.brightness)?);
                 }
-                self.breathing_brightness = Some(packet[2]);
+                self.brightness = Some(settings.brightness);
                 self.needs_sync = false;
             }
-            _ => {
-                if self.breathing_brightness.take().is_some() {
-                    frames.push(brightness_frame(
-                        self.brightness.unwrap_or(settings.brightness),
-                    )?);
-                    self.needs_sync = true;
-                }
-            }
+            _ => {}
         }
         Ok(frames)
     }
@@ -508,14 +489,8 @@ fn frames_for(
         ControlCommand::PartyFrame { value, enter, .. } => {
             Ok(party_frames(profile, parse_hex_color(value)?, *enter))
         }
-        ControlCommand::BreathingFrame {
-            value, brightness, ..
-        } => {
-            let mut frames = vec![color_frame(profile, parse_hex_color(value)?)];
-            if let Some(brightness) = brightness {
-                frames.push(brightness_frame(*brightness)?);
-            }
-            Ok(frames)
+        ControlCommand::BreathingFrame { value, .. } => {
+            Ok(vec![color_frame(profile, parse_hex_color(value)?)])
         }
         ControlCommand::Experiment { payload, .. } => Ok(vec![experimental_mode_frame(payload)?]),
     }
@@ -752,68 +727,36 @@ mod tests {
     }
 
     #[test]
-    fn breathing_deduplicates_brightness_and_restores_the_selected_static_level() {
+    fn breathing_keeps_selected_brightness_and_sends_only_color_after_sync() {
         for profile in [DeviceProfile::Classic, DeviceProfile::H6005] {
             let settings = Settings::default();
             let mut state = LightState::default();
-            let boosted = ControlCommand::BreathingFrame {
-                value: "#0000ff".into(),
-                brightness: Some(1.0),
-                device: None,
-            };
-            assert_eq!(
-                state.frames(&settings, &boosted, profile).unwrap(),
-                vec![
-                    color_frame(profile, [0, 0, 255]),
-                    brightness_frame(1.0).unwrap(),
-                ]
-            );
-            assert_eq!(state.frames(&settings, &boosted, profile).unwrap().len(), 1);
+            for (index, color) in ["#ff0000", "#ffff00", "#00ff00", "#0000ff"]
+                .iter()
+                .enumerate()
+            {
+                let command = ControlCommand::BreathingFrame {
+                    value: (*color).into(),
+                    device: None,
+                };
+                let mut expected = vec![color_frame(profile, parse_hex_color(color).unwrap())];
+                if index == 0 {
+                    expected.push(brightness_frame(settings.brightness).unwrap());
+                }
+                assert_eq!(
+                    state.frames(&settings, &command, profile).unwrap(),
+                    expected
+                );
+                assert_eq!(state.brightness, Some(settings.brightness));
+            }
             state.needs_sync = true;
-            assert_eq!(state.frames(&settings, &boosted, profile).unwrap().len(), 2);
-            let normal = ControlCommand::Color {
-                value: "#ff0000".into(),
-                brightness: None,
+            let command = ControlCommand::BreathingFrame {
+                value: "#00ffff".into(),
                 device: None,
             };
             assert_eq!(
-                state.frames(&settings, &normal, profile).unwrap(),
-                vec![
-                    color_frame(profile, [255, 0, 0]),
-                    brightness_frame(settings.brightness).unwrap(),
-                ]
-            );
-            assert!(state.breathing_brightness.is_none());
-            assert_eq!(state.brightness, Some(settings.brightness));
-            state.frames(&settings, &boosted, profile).unwrap();
-            let lowered = ControlCommand::BreathingFrame {
-                value: "#ffff00".into(),
-                brightness: Some(0.4),
-                device: None,
-            };
-            assert_eq!(state.frames(&settings, &lowered, profile).unwrap().len(), 2);
-            assert_eq!(state.frames(&settings, &lowered, profile).unwrap().len(), 1);
-            let manual_brightness = ControlCommand::Brightness {
-                value: 0.2,
-                device: None,
-            };
-            assert_eq!(
-                state
-                    .frames(&settings, &manual_brightness, profile)
-                    .unwrap(),
-                vec![
-                    color_frame(profile, [255, 0, 0]),
-                    brightness_frame(0.2).unwrap(),
-                ]
-            );
-            state.frames(&settings, &boosted, profile).unwrap();
-            let power = ControlCommand::Power {
-                on: false,
-                device: None,
-            };
-            assert_eq!(
-                state.frames(&settings, &power, profile).unwrap(),
-                vec![power_frame(false), brightness_frame(0.2).unwrap()]
+                state.frames(&settings, &command, profile).unwrap()[1],
+                brightness_frame(settings.brightness).unwrap()
             );
         }
     }

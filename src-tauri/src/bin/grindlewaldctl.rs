@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use grindlewald_lib::{
-    breathing::{color_step_from_degrees, default_color_step, resolve_cycle_seconds},
+    breathing::{color_step_from_degrees, default_color_step, frame_interval, resolve_interval_ms},
     command::{CommandResponse, ControlCommand},
     ipc::socket_path,
 };
@@ -8,6 +8,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 fn parse_hue_step(value: &str) -> Result<u16, String> {
     color_step_from_degrees(value.parse::<f32>().map_err(|error| error.to_string())?)
+}
+
+fn parse_interval(value: &str) -> Result<u32, String> {
+    let ms = value.parse::<u32>().map_err(|error| error.to_string())?;
+    frame_interval(ms)?;
+    Ok(ms)
 }
 
 #[derive(Parser)]
@@ -72,10 +78,13 @@ enum CliCommand {
     },
     /// Start a slow color-breathing effect.
     Breathe {
-        /// Seconds for one full spectrum cycle (default 600; minimum depends on color step).
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=3600))]
+        /// Milliseconds between color steps (250-1000 in increments of 50; default 400).
+        #[arg(long, conflicts_with_all = ["pace", "cycle_seconds"], value_parser = parse_interval)]
+        interval_ms: Option<u32>,
+        /// Legacy full-cycle duration, converted to the nearest supported step interval.
+        #[arg(long, hide = true, value_parser = clap::value_parser!(u32).range(1..=3600))]
         cycle_seconds: Option<u32>,
-        /// Legacy average seconds per frame; converted to the existing whole-cycle bounds.
+        /// Seconds between steps (0.25-1 in increments of 0.05).
         #[arg(long, conflicts_with = "cycle_seconds", value_parser = clap::value_parser!(f32))]
         pace: Option<f32>,
         /// RGB steps along the color wheel per update (1-100); 1 is the smallest change.
@@ -137,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         },
         CliCommand::Party { light } => ControlCommand::Party { device: light },
         CliCommand::Breathe {
+            interval_ms,
             cycle_seconds,
             pace,
             color_step,
@@ -145,10 +155,11 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let color_step = hue_step.unwrap_or(color_step);
             ControlCommand::Breathe {
-                cycle_seconds: Some(
-                    resolve_cycle_seconds(cycle_seconds, pace, color_step)
+                interval_ms: Some(
+                    resolve_interval_ms(interval_ms, pace, cycle_seconds, color_step)
                         .map_err(anyhow::Error::msg)?,
                 ),
+                cycle_seconds: None,
                 pace_seconds: None,
                 color_step,
                 hue_step_degrees: None,
@@ -192,28 +203,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cycle_cli_accepts_whole_seconds_and_rejects_conflicting_legacy_pace() {
-        let cli = Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", "600"]).unwrap();
-        let CliCommand::Breathe {
-            cycle_seconds,
-            pace,
-            color_step,
-            ..
-        } = cli.command
-        else {
-            panic!("expected breathe")
-        };
-        assert_eq!(
-            resolve_cycle_seconds(cycle_seconds, pace, color_step).unwrap(),
-            600
-        );
-        for invalid in ["0", "3601", "4.8", "-1"] {
-            assert!(Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", invalid]).is_err());
+    fn interval_cli_accepts_only_supported_millisecond_increments() {
+        for interval in (250..=1000).step_by(50) {
+            let cli =
+                Cli::try_parse_from(["ctl", "breathe", "--interval-ms", &interval.to_string()])
+                    .unwrap();
+            let CliCommand::Breathe { interval_ms, .. } = cli.command else {
+                panic!("expected breathe")
+            };
+            assert_eq!(interval_ms, Some(interval));
         }
-        assert!(
-            Cli::try_parse_from(["ctl", "breathe", "--cycle-seconds", "600", "--pace", "1"])
-                .is_err()
-        );
+        for invalid in ["0", "249", "251", "275", "1001", "0.25", "-1"] {
+            assert!(Cli::try_parse_from(["ctl", "breathe", "--interval-ms", invalid]).is_err());
+        }
+        for legacy in ["--pace", "--cycle-seconds"] {
+            assert!(
+                Cli::try_parse_from(["ctl", "breathe", "--interval-ms", "400", legacy, "1"])
+                    .is_err()
+            );
+        }
     }
 
     #[test]

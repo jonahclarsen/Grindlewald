@@ -140,7 +140,7 @@ input[type="range"] { accent-color: var(--ice); }
 .compact { padding: 5px 9px; }
 .effect-button.active { border: 2px inset var(--orange); color: #ffb078; background: #003d4d; box-shadow: none; }
 .pace-control { font-size: 10px; }
-#breathing-cycle-output { width: 64px; }
+#breathing-interval-output { width: 64px; }
 .section-heading { margin: 14px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--teal-dark); }
 .text-button { font-size: 11px; text-decoration: underline; }
 .preset-chips { flex-wrap: wrap; gap: 5px; overflow: visible; }
