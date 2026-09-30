@@ -310,6 +310,14 @@ pub fn run() {
                     let _ = playback_handle.emit("breathing-frame", frame);
                 }
             });
+            let mut light_selection = state.subscribe_light_selection();
+            let selection_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while light_selection.changed().await.is_ok() {
+                    let selection = light_selection.borrow_and_update().clone();
+                    let _ = selection_handle.emit("light-selection", selection);
+                }
+            });
             state.start_scheduler();
             let socket_state = state.clone();
             tauri::async_runtime::spawn(async move {

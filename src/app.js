@@ -392,24 +392,11 @@ async function save() {
   }
 }
 
-// Mirror the preset in the pickers so a later reconnect restores what the light shows.
-function applyPreset(name) {
-  queueControl({ command: "preset", name, device: null });
-  const preset = settings.presets.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
-  if (!preset) return;
-  settings.mode = preset.mode;
-  if (preset.mode === "color") {
-    settings.color = preset.value;
-  } else {
-    settings.white = preset.value;
-    settings.whiteKelvin = null;
-  }
-  settings.brightness = preset.brightness;
+function renderLightSelection() {
   paintHue(hueFromHex(settings.color));
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
-  save();
 }
 
 function queueControl(command) {
@@ -662,10 +649,8 @@ function renderBreathingControls() {
 }
 
 function renderAll() {
-  paintHue(activeEffect === "breathe" && latestBreathingFrame ? latestBreathingFrame.position / 1530 * 360 : hueFromHex(settings.color));
-  updateWhite(whitePositionFromHex(settings.white), false);
-  $("#brightness").value = Math.round(settings.brightness * 100);
-  $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
+  renderLightSelection();
+  if (activeEffect === "breathe" && latestBreathingFrame) paintHue(latestBreathingFrame.position / 1530 * 360);
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   renderBreathingControls();
   renderQuickPresets();
@@ -763,7 +748,7 @@ document.addEventListener("click", async (event) => {
   if (pageButton) showPage(pageButton.dataset.page || pageButton.dataset.pageLink);
 
   const presetButton = event.target.closest("[data-preset]");
-  if (presetButton) applyPreset(presetButton.dataset.preset);
+  if (presetButton) queueControl({ command: "preset", name: presetButton.dataset.preset, device: null });
 
   const powerButton = event.target.closest("[data-power]");
   if (powerButton) queueControl({ command: "power", on: powerButton.dataset.power === "true", device: null });
@@ -1157,6 +1142,12 @@ document.addEventListener("keydown", (event) => {
 
 if (window.__TAURI__?.event?.listen) {
   await window.__TAURI__.event.listen("breathing-frame", ({ payload }) => applyBreathingPlayback(payload));
+  // Presets (including background schedules) are saved by the backend; mirror them here.
+  await window.__TAURI__.event.listen("light-selection", ({ payload }) => {
+    if (!payload || !settings) return;
+    Object.assign(settings, payload);
+    renderLightSelection();
+  });
 }
 
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");

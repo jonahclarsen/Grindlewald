@@ -39,6 +39,17 @@ pub struct BreathingPlayback {
     pub frame_id: u64,
 }
 
+// The picker state a preset leaves behind, mirrored into the UI sliders.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightSelection {
+    pub mode: LightMode,
+    pub color: String,
+    pub white: String,
+    pub white_kelvin: Option<u16>,
+    pub brightness: f32,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BreathingSeek {
     position: u16,
@@ -57,6 +68,7 @@ pub struct SharedState {
     disconnecting: Arc<AtomicBool>,
     breathing_frames: watch::Sender<Option<BreathingPlayback>>,
     breathing_seek: watch::Sender<Option<BreathingSeek>>,
+    light_selection: watch::Sender<Option<LightSelection>>,
 }
 
 impl SharedState {
@@ -71,11 +83,26 @@ impl SharedState {
             disconnecting: Arc::new(AtomicBool::new(false)),
             breathing_frames: watch::channel(None).0,
             breathing_seek: watch::channel(None).0,
+            light_selection: watch::channel(None).0,
         }
     }
 
     pub fn subscribe_breathing(&self) -> watch::Receiver<Option<BreathingPlayback>> {
         self.breathing_frames.subscribe()
+    }
+
+    pub fn subscribe_light_selection(&self) -> watch::Receiver<Option<LightSelection>> {
+        self.light_selection.subscribe()
+    }
+
+    // Reload before saving so a slow Bluetooth write never clobbers newer edits.
+    fn remember_preset(&self, command: &ControlCommand) -> Result<(), String> {
+        let mut settings = self.load_settings()?;
+        if let Some(selection) = select_preset(&mut settings, command) {
+            self.save_settings(&settings)?;
+            self.light_selection.send_replace(Some(selection));
+        }
+        Ok(())
     }
 
     fn current_breathing(&self) -> Option<BreathingPlayback> {
@@ -228,6 +255,7 @@ impl SharedState {
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
+        let preset = matches!(command, ControlCommand::Preset { .. });
         let command = resolve_preset(&settings, command)?;
         let result = self
             .controller
@@ -236,6 +264,12 @@ impl SharedState {
             .apply(&settings, &command)
             .await;
         self.arm_idle_disconnect(settings.connection_hold_seconds);
+        if preset
+            && result.is_ok()
+            && let Err(error) = self.remember_preset(&command)
+        {
+            eprintln!("Grindlewald could not save the preset selection: {error}");
+        }
         result
     }
 
@@ -679,6 +713,37 @@ async fn until_disconnect<T>(
     }
 }
 
+fn select_preset(settings: &mut Settings, command: &ControlCommand) -> Option<LightSelection> {
+    match command {
+        ControlCommand::Color {
+            value, brightness, ..
+        } => {
+            settings.mode = LightMode::Color;
+            settings.color = value.clone();
+            settings.brightness = brightness.unwrap_or(settings.brightness);
+        }
+        ControlCommand::White {
+            value,
+            kelvin,
+            brightness,
+            ..
+        } => {
+            settings.mode = LightMode::White;
+            settings.white = value.clone();
+            settings.white_kelvin = *kelvin;
+            settings.brightness = brightness.unwrap_or(settings.brightness);
+        }
+        _ => return None,
+    }
+    Some(LightSelection {
+        mode: settings.mode,
+        color: settings.color.clone(),
+        white: settings.white.clone(),
+        white_kelvin: settings.white_kelvin,
+        brightness: settings.brightness,
+    })
+}
+
 fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<ControlCommand, String> {
     let ControlCommand::Preset { name, device } = command else {
         return Ok(command);
@@ -705,12 +770,60 @@ fn resolve_preset(settings: &Settings, command: ControlCommand) -> Result<Contro
 
 #[cfg(test)]
 mod tests {
-    use super::{SharedState, until_disconnect};
+    use super::{SharedState, resolve_preset, select_preset, until_disconnect};
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
     use tokio::sync::{Mutex, oneshot, watch};
+
+    use crate::{
+        command::ControlCommand,
+        settings::{LightMode, Settings},
+    };
+
+    #[test]
+    fn presets_move_the_ui_selection_to_match_the_light() {
+        let mut settings = Settings {
+            mode: LightMode::Color,
+            white_kelvin: Some(6000),
+            ..Settings::default()
+        };
+        let command = resolve_preset(
+            &settings,
+            ControlCommand::Preset {
+                name: "eveningtime".into(),
+                device: None,
+            },
+        )
+        .unwrap();
+        let selection = select_preset(&mut settings, &command).unwrap();
+        assert_eq!(settings.mode, LightMode::White);
+        assert_eq!(settings.white, "#ff8912");
+        // Presets carry no kelvin, so the light infers it from the swatch.
+        assert_eq!(settings.white_kelvin, None);
+        assert_eq!(settings.brightness, 0.35);
+        assert_eq!(selection.white, settings.white);
+
+        let command = resolve_preset(
+            &settings,
+            ControlCommand::Preset {
+                name: "nighttime".into(),
+                device: None,
+            },
+        )
+        .unwrap();
+        select_preset(&mut settings, &command).unwrap();
+        assert_eq!(settings.mode, LightMode::Color);
+        assert_eq!(settings.color, "#ff4500");
+        assert_eq!(settings.white, "#ff8912");
+
+        let power = ControlCommand::Power {
+            on: false,
+            device: None,
+        };
+        assert!(select_preset(&mut settings, &power).is_none());
+    }
 
     #[tokio::test]
     async fn seeking_updates_the_running_effect_without_stopping_or_loading_settings() {
