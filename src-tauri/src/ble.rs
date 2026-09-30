@@ -15,7 +15,7 @@ use crate::{
         CONTROL_CHARACTERISTIC, brightness_frame, color_frame, experimental_mode_frame,
         keep_alive_frame, parse_hex_color, party_frames, power_frame, white_frame,
     },
-    settings::{DeviceConfig, Settings},
+    settings::{DeviceConfig, LightMode, Settings},
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -372,7 +372,6 @@ impl BleController {
 // Desired values survive disconnects; synchronization is scoped to each BLE link.
 #[derive(Clone)]
 struct LightState {
-    color: Option<[u8; 20]>,
     brightness: Option<f32>,
     needs_sync: bool,
 }
@@ -380,7 +379,6 @@ struct LightState {
 impl Default for LightState {
     fn default() -> Self {
         Self {
-            color: None,
             brightness: None,
             needs_sync: true,
         }
@@ -405,18 +403,22 @@ impl LightState {
                 {
                     frames.push(brightness_frame(desired)?);
                 }
-                self.color = Some(frames[0]);
                 self.brightness = Some(desired);
                 self.needs_sync = false;
             }
             ControlCommand::Brightness { value, .. } => {
+                // Another controller (such as the phone app) may have changed the
+                // light since this link was lost, so restore the UI's selection.
                 if self.needs_sync {
-                    let color = match self.color {
-                        Some(color) => color,
-                        None => color_frame(profile, parse_hex_color(&settings.color)?),
+                    let color = match settings.mode {
+                        LightMode::Color => color_frame(profile, parse_hex_color(&settings.color)?),
+                        LightMode::White => white_frame(
+                            profile,
+                            parse_hex_color(&settings.white)?,
+                            settings.white_kelvin,
+                        ),
                     };
                     frames.insert(0, color);
-                    self.color = Some(color);
                 }
                 self.brightness = Some(*value);
                 self.needs_sync = false;
@@ -648,20 +650,33 @@ mod tests {
     #[test]
     fn reconnect_syncs_both_once_for_color_and_white_on_each_profile() {
         for profile in [DeviceProfile::Classic, DeviceProfile::H6005] {
-            for command in [
-                ControlCommand::Color {
-                    value: "#123456".into(),
-                    brightness: Some(0.0),
-                    device: None,
-                },
-                ControlCommand::White {
-                    value: "#ffccaa".into(),
-                    kelvin: Some(2700),
-                    brightness: Some(0.0),
-                    device: None,
-                },
+            for (command, settings) in [
+                (
+                    ControlCommand::Color {
+                        value: "#123456".into(),
+                        brightness: Some(0.0),
+                        device: None,
+                    },
+                    Settings {
+                        color: "#123456".into(),
+                        ..Settings::default()
+                    },
+                ),
+                (
+                    ControlCommand::White {
+                        value: "#ffccaa".into(),
+                        kelvin: Some(2700),
+                        brightness: Some(0.0),
+                        device: None,
+                    },
+                    Settings {
+                        mode: LightMode::White,
+                        white: "#ffccaa".into(),
+                        white_kelvin: Some(2700),
+                        ..Settings::default()
+                    },
+                ),
             ] {
-                let settings = Settings::default();
                 let mut state = LightState::default();
                 let expected = frames_for(&command, profile).unwrap();
                 assert_eq!(
@@ -697,6 +712,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reconnect_brightness_restores_the_ui_selection_instead_of_the_last_frame() {
+        let profile = DeviceProfile::H6005;
+        let settings = Settings {
+            mode: LightMode::White,
+            white: "#ffa957".into(),
+            white_kelvin: Some(2700),
+            ..Settings::default()
+        };
+        let mut state = LightState::default();
+        state
+            .frames(
+                &settings,
+                &ControlCommand::White {
+                    value: "#ff8912".into(),
+                    kelvin: None,
+                    brightness: Some(0.35),
+                    device: None,
+                },
+                profile,
+            )
+            .unwrap();
+        state.needs_sync = true;
+        let command = ControlCommand::Brightness {
+            value: 0.5,
+            device: None,
+        };
+        assert_eq!(
+            state.frames(&settings, &command, profile).unwrap(),
+            vec![
+                white_frame(profile, [0xff, 0xa9, 0x57], Some(2700)),
+                brightness_frame(0.5).unwrap()
+            ]
+        );
+        assert_eq!(
+            state.frames(&settings, &command, profile).unwrap(),
+            vec![brightness_frame(0.5).unwrap()]
+        );
     }
 
     #[test]

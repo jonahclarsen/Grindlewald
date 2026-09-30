@@ -184,7 +184,9 @@ function updateHue(hue, shouldSend = true) {
     });
   }
   settings.color = colorAtHue(normalizedHue);
-  if (shouldSend) queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
+  if (!shouldSend) return;
+  settings.mode = "color";
+  queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
 }
 
 function updateWhite(position, shouldSend = true) {
@@ -193,7 +195,10 @@ function updateWhite(position, shouldSend = true) {
   $("#white-knob").style.setProperty("--knob-position", `${normalizedPosition * 100}%`);
   $("#white-swatch").style.background = settings.white;
   $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
-  if (shouldSend) queueControl({ command: "white", value: settings.white, kelvin: kelvinAtPosition(normalizedPosition), brightness: settings.brightness, device: null });
+  if (!shouldSend) return;
+  settings.mode = "white";
+  settings.whiteKelvin = kelvinAtPosition(normalizedPosition);
+  queueControl({ command: "white", value: settings.white, kelvin: settings.whiteKelvin, brightness: settings.brightness, device: null });
 }
 
 function makeDraggable(track, update) {
@@ -385,6 +390,26 @@ async function save() {
     setStatus(String(error), "error");
     return false;
   }
+}
+
+// Mirror the preset in the pickers so a later reconnect restores what the light shows.
+function applyPreset(name) {
+  queueControl({ command: "preset", name, device: null });
+  const preset = settings.presets.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+  if (!preset) return;
+  settings.mode = preset.mode;
+  if (preset.mode === "color") {
+    settings.color = preset.value;
+  } else {
+    settings.white = preset.value;
+    settings.whiteKelvin = null;
+  }
+  settings.brightness = preset.brightness;
+  paintHue(hueFromHex(settings.color));
+  updateWhite(whitePositionFromHex(settings.white), false);
+  $("#brightness").value = Math.round(settings.brightness * 100);
+  $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
+  save();
 }
 
 function queueControl(command) {
@@ -738,7 +763,7 @@ document.addEventListener("click", async (event) => {
   if (pageButton) showPage(pageButton.dataset.page || pageButton.dataset.pageLink);
 
   const presetButton = event.target.closest("[data-preset]");
-  if (presetButton) queueControl({ command: "preset", name: presetButton.dataset.preset, device: null });
+  if (presetButton) applyPreset(presetButton.dataset.preset);
 
   const powerButton = event.target.closest("[data-power]");
   if (powerButton) queueControl({ command: "power", on: powerButton.dataset.power === "true", device: null });

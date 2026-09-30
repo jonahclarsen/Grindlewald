@@ -102,6 +102,11 @@ pub struct Settings {
     pub white: String,
     #[serde(default = "default_brightness")]
     pub brightness: f32,
+    // The picker last used in the UI, restored on the first write after reconnecting.
+    #[serde(default = "default_mode")]
+    pub mode: LightMode,
+    #[serde(default)]
+    pub white_kelvin: Option<u16>,
     #[serde(default = "default_connection_hold_seconds")]
     pub connection_hold_seconds: u64,
     #[serde(default = "default_interval_ms")]
@@ -128,6 +133,10 @@ fn default_brightness() -> f32 {
     0.4
 }
 
+fn default_mode() -> LightMode {
+    LightMode::Color
+}
+
 fn default_connection_hold_seconds() -> u64 {
     6
 }
@@ -139,6 +148,8 @@ impl Default for Settings {
             color: default_color(),
             white: default_white(),
             brightness: default_brightness(),
+            mode: default_mode(),
+            white_kelvin: None,
             connection_hold_seconds: default_connection_hold_seconds(),
             breathing_interval_ms: default_interval_ms(),
             breathing_color_step: default_color_step(),
