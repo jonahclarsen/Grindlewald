@@ -97,7 +97,7 @@ Brightness values range from `0.0` through `1.0`. Preset and light names are cas
 
 ## Automations
 
-On **Automations**, create an automation, choose its daily local time and preset, then select any number of lights. Selecting no lights means all enabled lights. Each automation can also turn the floodlights on or off, or leave them unchanged. The scheduler runs inside the menu-bar process, so keep Grindlewald running.
+On **Automations**, automations sort by daily local time starting at 6 a.m., with midnight through 5:59 a.m. at the end. Choose a preset and individual lights, or check **All lights** to target all enabled lights. Selecting no lights leaves the lights unchanged. Choose **No preset** to run only the other actions. Existing automations retain their previous light targets. Each automation can also turn the floodlights on or off, or leave them unchanged. The scheduler runs inside the menu-bar process, so keep Grindlewald running.
 
 Use **Disable for** at the top of an enabled automation to pause it for **1–8 days**. Each day is exactly 24 hours, including across daylight-saving changes. The saved resume time survives app restarts; afterward the automation resumes its daily schedule without replaying missed runs. Its checkbox turns it back on early. Manually disabled automations stay off and do not offer the dropdown.
 

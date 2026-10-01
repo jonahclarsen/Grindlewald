@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "../src/schedules.js";
+import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "../src/schedules.js";
 
 test("every duration pauses for exactly N × 24 hours and resumes at the deadline", () => {
   // Crosses the autumn daylight-saving transition in America/Vancouver.
@@ -30,4 +30,24 @@ test("rejects invalid durations without changing the automation", () => {
     assert.throws(() => disableScheduleFor(schedule, days, 0), /between 1 and 8/);
     assert.deepEqual(schedule, { enabled: true });
   }
+});
+
+
+test("automations sort from 6 a.m. through the following early morning with stable ties", () => {
+  const schedules = ["00:00", "20:00", "05:59", "06:00", "23:59", "12:30", "06:00"]
+    .map((time, id) => ({ time, id }));
+  const entries = sortedScheduleEntries(schedules);
+  assert.deepEqual(entries.map(({ schedule }) => schedule.time),
+    ["06:00", "06:00", "12:30", "20:00", "23:59", "00:00", "05:59"]);
+  assert.deepEqual(entries.map(({ index }) => index), [3, 6, 5, 1, 4, 0, 2]);
+  entries.forEach(({ schedule, index }) => assert.equal(schedule, schedules[index]));
+  schedules[1].time = "06:01";
+  assert.equal(sortedScheduleEntries(schedules)[2].index, 1);
+});
+
+test("explicit empty selections leave lights alone while legacy selections retain their meaning", () => {
+  assert.equal(usesAllLights({ lights: [] }), true);
+  assert.equal(usesAllLights({ lights: ["Lamp"] }), false);
+  assert.equal(usesAllLights({ allLights: false, lights: [] }), false);
+  assert.equal(usesAllLights({ allLights: true, lights: [] }), true);
 });

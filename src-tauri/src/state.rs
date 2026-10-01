@@ -532,14 +532,13 @@ impl SharedState {
             schedule.time,
             schedule.floodlights
         );
-        let targets = if schedule.lights.is_empty() {
-            vec![None]
-        } else {
-            schedule.lights.iter().cloned().map(Some).collect()
-        };
+        let targets = schedule.light_targets();
         let preset_name = schedule.preset.clone();
         let state = self.clone();
         let lights = async move {
+            if targets.is_empty() {
+                return Ok("Lights unchanged".into());
+            }
             let mut messages = Vec::new();
             for target in targets {
                 messages.push(
@@ -781,6 +780,23 @@ mod tests {
         command::ControlCommand,
         settings::{LightMode, Settings},
     };
+
+    #[tokio::test]
+    async fn automations_can_run_shell_actions_without_touching_lights() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        for preset in ["", "missing-preset"] {
+            let schedule = serde_json::from_value(serde_json::json!({
+                "id": "no-lights", "name": "No lights", "time": "06:00",
+                "preset": preset, "allLights": false, "shellCommand": "exit 0"
+            }))
+            .unwrap();
+            let result = state.run_schedule(schedule).await.unwrap();
+            assert!(result.contains("Lights unchanged"));
+            assert!(result.contains("Shell command completed"));
+        }
+        assert!(!state.settings_path().exists());
+    }
 
     #[test]
     fn presets_move_the_ui_selection_to_match_the_light() {

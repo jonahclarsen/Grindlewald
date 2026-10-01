@@ -66,6 +66,11 @@ pub struct Schedule {
     pub disabled_until: Option<i64>,
     #[serde(default)]
     pub lights: Vec<String>,
+    /// Missing on legacy schedules: an empty target list meant all enabled lights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all_lights: Option<bool>,
+    /// Empty means this automation does not apply a light preset.
+    #[serde(default)]
     pub preset: String,
     #[serde(default)]
     pub floodlights: FloodlightAction,
@@ -82,6 +87,16 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    pub fn light_targets(&self) -> Vec<Option<String>> {
+        if self.preset.is_empty() {
+            Vec::new()
+        } else if self.all_lights.unwrap_or(self.lights.is_empty()) {
+            vec![None]
+        } else {
+            self.lights.iter().cloned().map(Some).collect()
+        }
+    }
+
     pub fn is_enabled_at(&self, now_millis: i64) -> bool {
         self.enabled && self.disabled_until.is_none_or(|until| now_millis >= until)
     }
@@ -268,10 +283,11 @@ impl Settings {
             if !valid_time {
                 return Err(format!("schedule {:?} needs an HH:MM time", schedule.name));
             }
-            if !self
-                .presets
-                .iter()
-                .any(|preset| preset.name == schedule.preset)
+            if !schedule.preset.is_empty()
+                && !self
+                    .presets
+                    .iter()
+                    .any(|preset| preset.name == schedule.preset)
             {
                 return Err(format!(
                     "schedule {:?} references missing preset {:?}",
@@ -377,6 +393,47 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn light_targets_preserve_legacy_behavior_and_support_explicit_none() {
+        let mut schedule: Schedule = serde_json::from_value(serde_json::json!({
+            "id": "targets", "name": "Targets", "time": "06:00", "preset": "daytime"
+        }))
+        .unwrap();
+        assert_eq!(schedule.light_targets(), vec![None]);
+        schedule.lights = vec!["Lamp".into()];
+        assert_eq!(schedule.light_targets(), vec![Some("Lamp".into())]);
+        schedule.all_lights = Some(true);
+        assert_eq!(schedule.light_targets(), vec![None]);
+        schedule.all_lights = Some(false);
+        schedule.lights.clear();
+        assert!(schedule.light_targets().is_empty());
+        let restored: Schedule =
+            serde_json::from_value(serde_json::to_value(&schedule).unwrap()).unwrap();
+        assert!(restored.light_targets().is_empty());
+        schedule.all_lights = Some(true);
+        schedule.preset.clear();
+        assert!(schedule.light_targets().is_empty());
+    }
+
+    #[test]
+    fn automations_without_presets_validate_and_survive_reload() {
+        let schedule: Schedule = serde_json::from_value(serde_json::json!({
+            "id": "no-preset", "name": "No preset", "time": "06:00", "allLights": false
+        }))
+        .unwrap();
+        let mut settings = Settings {
+            presets: vec![],
+            schedules: vec![schedule],
+            ..Settings::default()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path).unwrap().schedules, settings.schedules);
+        settings.schedules[0].preset = "missing".into();
+        assert!(settings.validate().unwrap_err().contains("missing preset"));
+    }
 
     #[test]
     fn settings_round_trip_without_bundled_devices() {
@@ -534,6 +591,7 @@ mod tests {
                 enabled: true,
                 disabled_until: None,
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],
+                all_lights: None,
                 preset: "daytime".into(),
                 floodlights: FloodlightAction::Unchanged,
                 floodlight_network: None,

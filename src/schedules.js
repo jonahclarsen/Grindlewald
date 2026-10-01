@@ -15,3 +15,17 @@ export function schedulePauseLabel(schedule, now = Date.now()) {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   })}`;
 }
+
+// Keep original indices so sorting the display never changes an editor's target.
+export function sortedScheduleEntries(schedules) {
+  const dayMinute = ({ time }) => {
+    const [hours, minutes] = time.split(":").map(Number);
+    return (hours * 60 + minutes - 360 + 1440) % 1440;
+  };
+  return schedules.map((schedule, index) => ({ schedule, index }))
+    .sort((a, b) => dayMinute(a.schedule) - dayMinute(b.schedule));
+}
+
+export function usesAllLights(schedule) {
+  return schedule.allLights ?? schedule.lights.length === 0;
+}

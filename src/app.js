@@ -1,7 +1,7 @@
 import { createControlQueue } from "./controls.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
-import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel } from "./schedules.js";
+import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const demoMode = !invoke;
@@ -499,8 +499,10 @@ function renderPresets() {
 }
 
 function renderSchedules() {
-  const presetOptions = settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
-  $("#schedule-editor").innerHTML = settings.schedules.length ? settings.schedules.map((schedule, index) => {
+  settings.schedules.forEach((schedule) => { schedule.allLights = usesAllLights(schedule); });
+  const presetOptions = '<option value="">No preset</option>' + settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
+  $("#schedule-editor").innerHTML = settings.schedules.length ? sortedScheduleEntries(settings.schedules).map(({ schedule, index }) => {
+    const allLights = usesAllLights(schedule);
     const enabled = isScheduleEnabled(schedule);
     const pauseLabel = schedulePauseLabel(schedule);
     if (collapsedScheduleIds.has(schedule.id)) {
@@ -548,7 +550,7 @@ function renderSchedules() {
         <small class="field full schedule-pause-status" data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small>
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
-        <div class="field full">Lights <span class="check-row">${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>None selected means all enabled lights.</small></div>
+        <div class="field full">Lights <span class="check-row"><label class="check-pill"><input type="checkbox" data-schedule-field="allLights" ${allLights ? "checked" : ""}>All lights</label>${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${!allLights && schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>${!schedule.preset || (!allLights && !schedule.lights.length) ? "This preset will not change the lights." : allLights ? "This preset will change all enabled lights." : "This preset will change the selected lights."}</small></div>
         <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_home_network" data-floodlight-network ${floodlightAction === "on_home_network" ? "checked" : ""}><span>Turn on if on home network</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-network-help>${escapeHtml(homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState))}</small></div>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
@@ -771,7 +773,7 @@ document.addEventListener("click", async (event) => {
   if (removePreset) {
     expandedEditorKey = null;
     const [removed] = settings.presets.splice(Number(removePreset.dataset.removePreset), 1);
-    settings.schedules = settings.schedules.filter((schedule) => schedule.preset !== removed.name);
+    settings.schedules.forEach((schedule) => { if (schedule.preset === removed.name) schedule.preset = ""; });
     await save(); renderAll();
   }
   const removeSchedule = event.target.closest("[data-remove-schedule]");
@@ -925,6 +927,7 @@ document.addEventListener("change", async (event) => {
       const field = event.target.dataset.scheduleField;
       schedule[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
       if (field === "enabled") schedule.disabledUntil = null;
+      if (field === "allLights") schedule.lights = [];
       if (field === "floodlights") {
         networkSelections.delete(schedule.id);
         schedule.floodlightNetwork = null;
@@ -932,6 +935,7 @@ document.addEventListener("change", async (event) => {
       }
     }
     if (event.target.dataset.scheduleLight) {
+      schedule.allLights = false;
       const light = event.target.dataset.scheduleLight;
       schedule.lights = event.target.checked ? [...new Set([...schedule.lights, light])] : schedule.lights.filter((name) => name !== light);
     }
@@ -1059,9 +1063,8 @@ $("#add-preset").addEventListener("click", async () => {
   await save(); renderAll();
 });
 $("#add-schedule").addEventListener("click", async () => {
-  if (!settings.presets.length) { showPage("settings-page"); return setStatus("Add a preset first", "error"); }
   const fingerprint = await refreshHomeNetwork();
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], preset: settings.presets[0].name, floodlights: "on_home_network", floodlightNetwork: fingerprint, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
