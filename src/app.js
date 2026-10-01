@@ -250,11 +250,11 @@ function setDiscoveryBusy(isBusy) {
   }
 }
 
-function renderFloodlightTimer({ state, error, attempt, nextRetryAt }) {
+function renderFloodlightTimer({ state, error, attempt, nextRetryAt, minutes }) {
   const note = $("#floodlight-retry");
   if (state === "retrying") {
     const time = new Date(nextRetryAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    note.textContent = `Couldn’t turn off after 5 min (attempt ${attempt}). Retrying at ${time}, for up to 12 hours.`;
+    note.textContent = `Couldn’t turn off after ${minutes} min (attempt ${attempt}). Retrying at ${time}, for up to 12 hours.`;
     note.title = summarizeError(error);
     note.hidden = false;
   } else if (state === "failed") {
@@ -262,7 +262,7 @@ function renderFloodlightTimer({ state, error, attempt, nextRetryAt }) {
     setStatus(`Gave up turning floodlights off after 12 hours: ${error}`, "error");
   } else {
     note.hidden = true;
-    if (state === "off") setStatus("Floodlights off (5 min timer)");
+    if (state === "off") setStatus(`Floodlights off (${minutes} min timer)`);
   }
 }
 

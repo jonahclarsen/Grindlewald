@@ -291,7 +291,7 @@ async fn set_floodlights(
             }
             let error = match run_floodlight_script(false).await {
                 Ok(_) => {
-                    emit(serde_json::json!({ "state": "off" }));
+                    emit(serde_json::json!({ "state": "off", "minutes": seconds / 60 }));
                     return;
                 }
                 Err(error) => error,
@@ -308,6 +308,7 @@ async fn set_floodlights(
             let next_retry_at = chrono::Local::now() + RETRY_INTERVAL;
             emit(serde_json::json!({
                 "state": "retrying",
+                "minutes": seconds / 60,
                 "error": error,
                 "attempt": attempt + 1,
                 "nextRetryAt": next_retry_at.timestamp_millis(),
