@@ -250,6 +250,22 @@ function setDiscoveryBusy(isBusy) {
   }
 }
 
+function renderFloodlightTimer({ state, error, attempt, nextRetryAt }) {
+  const note = $("#floodlight-retry");
+  if (state === "retrying") {
+    const time = new Date(nextRetryAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    note.textContent = `Couldn’t turn off after 5 min (attempt ${attempt}). Retrying at ${time}, for up to 12 hours.`;
+    note.title = summarizeError(error);
+    note.hidden = false;
+  } else if (state === "failed") {
+    note.hidden = true;
+    setStatus(`Gave up turning floodlights off after 12 hours: ${error}`, "error");
+  } else {
+    note.hidden = true;
+    if (state === "off") setStatus("Floodlights off (5 min timer)");
+  }
+}
+
 function setFloodlightsBusy(isBusy) {
   document.querySelectorAll("[data-floodlights]").forEach((button) => {
     button.disabled = isBusy;
@@ -776,6 +792,8 @@ document.addEventListener("click", async (event) => {
 
   const floodlightButton = event.target.closest("[data-floodlights]");
   if (floodlightButton) {
+    // Any manual floodlight command cancels a pending timed auto-off.
+    renderFloodlightTimer({ state: "idle" });
     const on = floodlightButton.dataset.floodlights === "true";
     const offAfterSeconds = Number(floodlightButton.dataset.floodlightsOffAfter) || null;
     setFloodlightsBusy(true);
@@ -1166,6 +1184,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 if (window.__TAURI__?.event?.listen) {
+  await window.__TAURI__.event.listen("floodlight-timer", ({ payload }) => renderFloodlightTimer(payload));
   await window.__TAURI__.event.listen("breathing-frame", ({ payload }) => applyBreathingPlayback(payload));
   // Presets (including background schedules) are saved by the backend; mirror them here.
   await window.__TAURI__.event.listen("light-selection", ({ payload }) => {

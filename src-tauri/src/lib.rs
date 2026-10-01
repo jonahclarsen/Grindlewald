@@ -264,7 +264,11 @@ async fn run_floodlight_script(on: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn set_floodlights(on: bool, off_after_seconds: Option<u64>) -> Result<String, String> {
+async fn set_floodlights(
+    app: tauri::AppHandle,
+    on: bool,
+    off_after_seconds: Option<u64>,
+) -> Result<String, String> {
     let message = run_floodlights(on).await?;
     let Some(seconds) = off_after_seconds.filter(|_| on) else {
         return Ok(message);
@@ -275,22 +279,40 @@ async fn set_floodlights(on: bool, off_after_seconds: Option<u64>) -> Result<Str
         // five minutes for up to twelve hours, unless another command supersedes it.
         const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
         const MAX_RETRIES: u32 = 12 * 60 / 5;
+        let superseded = || FLOODLIGHT_GENERATION.load(Ordering::SeqCst) != generation;
+        let emit = |payload: serde_json::Value| {
+            let _ = app.emit("floodlight-timer", payload);
+        };
         tokio::time::sleep(Duration::from_secs(seconds)).await;
         for attempt in 0..=MAX_RETRIES {
-            if FLOODLIGHT_GENERATION.load(Ordering::SeqCst) != generation {
+            if superseded() {
+                emit(serde_json::json!({ "state": "idle" }));
                 return;
             }
-            match run_floodlight_script(false).await {
-                Ok(_) => return,
-                Err(error) => eprintln!(
-                    "{} Grindlewald timed floodlight off failed (attempt {}): {error}",
-                    chrono::Local::now().to_rfc3339(),
-                    attempt + 1
-                ),
+            let error = match run_floodlight_script(false).await {
+                Ok(_) => {
+                    emit(serde_json::json!({ "state": "off" }));
+                    return;
+                }
+                Err(error) => error,
+            };
+            eprintln!(
+                "{} Grindlewald timed floodlight off failed (attempt {}): {error}",
+                chrono::Local::now().to_rfc3339(),
+                attempt + 1
+            );
+            if attempt == MAX_RETRIES {
+                emit(serde_json::json!({ "state": "failed", "error": error }));
+                return;
             }
-            if attempt < MAX_RETRIES {
-                tokio::time::sleep(RETRY_INTERVAL).await;
-            }
+            let next_retry_at = chrono::Local::now() + RETRY_INTERVAL;
+            emit(serde_json::json!({
+                "state": "retrying",
+                "error": error,
+                "attempt": attempt + 1,
+                "nextRetryAt": next_retry_at.timestamp_millis(),
+            }));
+            tokio::time::sleep(RETRY_INTERVAL).await;
         }
     });
     let minutes = seconds / 60;
