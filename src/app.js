@@ -1,4 +1,5 @@
 import { createControlQueue } from "./controls.js";
+import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
@@ -63,7 +64,8 @@ let refreshingConnection = false;
 let demoConnectedUntil = 0;
 let demoEffectActive = false;
 let expandedEditorKey = null;
-const collapsedScheduleIds = new Set();
+const automationEditors = createAutomationEditorState();
+let windowFocused = document.hasFocus();
 let privilegedService = demoMode
   ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
   : { installed: false, healthy: false, current: false, message: "Not installed" };
@@ -457,19 +459,32 @@ function refreshVisibleNetwork() {
   }
 }
 
-window.addEventListener("focus", refreshVisibleNetwork);
+function updateAutomationEditorActivity() {
+  const active = windowFocused && !document.hidden && Boolean($("#automations-page.active"));
+  if (automationEditors.setActive(active) && settings) renderSchedules();
+}
+
+window.addEventListener("blur", () => {
+  windowFocused = false;
+  updateAutomationEditorActivity();
+});
+window.addEventListener("focus", () => {
+  windowFocused = true;
+  updateAutomationEditorActivity();
+  refreshVisibleNetwork();
+});
 document.addEventListener("visibilitychange", () => {
+  updateAutomationEditorActivity();
   if (!document.hidden) refreshVisibleNetwork();
 });
 
 function showPage(pageId) {
   if (pageId === "automations-page") {
-    settings.schedules.forEach((schedule) => collapsedScheduleIds.add(schedule.id));
-    renderSchedules();
     void refreshHomeNetwork();
   }
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === pageId));
+  updateAutomationEditorActivity();
 }
 
 function renderQuickPresets() {
@@ -509,7 +524,7 @@ function renderSchedules() {
     const allLights = usesAllLights(schedule);
     const enabled = isScheduleEnabled(schedule);
     const pauseLabel = schedulePauseLabel(schedule);
-    if (collapsedScheduleIds.has(schedule.id)) {
+    if (!automationEditors.expandedIds.has(schedule.id)) {
       const [hours, minutes] = schedule.time.split(":").map(Number);
       const time = new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
@@ -706,7 +721,7 @@ document.addEventListener("click", async (event) => {
   const expandSchedule = event.target.closest("[data-expand-schedule]");
   if (expandSchedule) {
     const id = expandSchedule.dataset.expandSchedule;
-    collapsedScheduleIds.delete(id);
+    automationEditors.expandedIds.add(id);
     renderSchedules();
     [...document.querySelectorAll("[data-collapse-schedule]")].find((button) => button.dataset.collapseSchedule === id)?.focus();
     return;
@@ -715,7 +730,7 @@ document.addEventListener("click", async (event) => {
   const scheduleHeader = event.target.closest("[data-collapse-schedule-header]");
   if (collapseSchedule || (scheduleHeader && !event.target.closest("button, input, select, option, textarea, label"))) {
     const id = collapseSchedule?.dataset.collapseSchedule || scheduleHeader.dataset.collapseScheduleHeader;
-    collapsedScheduleIds.add(id);
+    automationEditors.expandedIds.delete(id);
     renderSchedules();
     [...document.querySelectorAll("[data-expand-schedule]")].find((button) => button.dataset.expandSchedule === id)?.focus();
     return;
@@ -790,6 +805,7 @@ document.addEventListener("click", async (event) => {
       try { await call("revoke_privileged_job", { id: schedule.id }); }
       catch (error) { setStatus(String(error), "error"); return; }
     }
+    automationEditors.expandedIds.delete(schedule.id);
     settings.schedules.splice(index, 1); await save(); renderSchedules();
   }
   const removeDevice = event.target.closest("[data-remove-device]");
@@ -1069,6 +1085,7 @@ $("#add-preset").addEventListener("click", async () => {
 $("#add-schedule").addEventListener("click", async () => {
   const fingerprint = await refreshHomeNetwork();
   settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  automationEditors.expandedIds.add(settings.schedules.at(-1).id);
   await save(); renderSchedules();
 });
 $("#discover-button").addEventListener("click", async () => {
