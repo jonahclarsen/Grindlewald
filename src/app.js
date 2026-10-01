@@ -366,7 +366,7 @@ async function callBackend(command, args = {}) {
       { name: "Govee H6005", identifier: "local-ble-id-1" },
       { name: "Govee new lamp", identifier: "LOCAL-DEMO-ID" },
     ];
-    if (command === "set_floodlights") return `Floodlights ${args.on ? "on" : "off"}`;
+    if (command === "set_floodlights") return args.on && args.offAfterSeconds ? `Floodlights on for ${args.offAfterSeconds / 60} min` : `Floodlights ${args.on ? "on" : "off"}`;
     if (command === "privileged_service_status") return privilegedService;
     if (command === "install_privileged_service") {
       privilegedService = { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" };
@@ -777,10 +777,11 @@ document.addEventListener("click", async (event) => {
   const floodlightButton = event.target.closest("[data-floodlights]");
   if (floodlightButton) {
     const on = floodlightButton.dataset.floodlights === "true";
+    const offAfterSeconds = Number(floodlightButton.dataset.floodlightsOffAfter) || null;
     setFloodlightsBusy(true);
     setStatus(`Turning floodlights ${on ? "on" : "off"}…`, "busy");
     try {
-      setStatus(await call("set_floodlights", { on }));
+      setStatus(await call("set_floodlights", { on, offAfterSeconds }));
     } catch (error) {
       setStatus(String(error), "error");
     } finally {

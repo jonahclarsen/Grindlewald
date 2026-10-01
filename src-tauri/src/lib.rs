@@ -9,7 +9,12 @@ pub mod settings;
 pub mod state;
 mod timing;
 
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use ble::DiscoveredDevice;
 use command::ControlCommand;
@@ -220,7 +225,16 @@ fn floodlight_python_path() -> PathBuf {
     PathBuf::from("python3")
 }
 
+/// Bumped on every floodlight command so a pending timed auto-off is cancelled
+/// by any later manual or scheduled floodlight change.
+static FLOODLIGHT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 async fn run_floodlights(on: bool) -> Result<String, String> {
+    FLOODLIGHT_GENERATION.fetch_add(1, Ordering::SeqCst);
+    run_floodlight_script(on).await
+}
+
+async fn run_floodlight_script(on: bool) -> Result<String, String> {
     let state = if on { "on" } else { "off" };
     eprintln!(
         "{} Grindlewald floodlight script starting: {state}",
@@ -250,8 +264,37 @@ async fn run_floodlights(on: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn set_floodlights(on: bool) -> Result<String, String> {
-    run_floodlights(on).await
+async fn set_floodlights(on: bool, off_after_seconds: Option<u64>) -> Result<String, String> {
+    let message = run_floodlights(on).await?;
+    let Some(seconds) = off_after_seconds.filter(|_| on) else {
+        return Ok(message);
+    };
+    let generation = FLOODLIGHT_GENERATION.load(Ordering::SeqCst);
+    tauri::async_runtime::spawn(async move {
+        // If turning off fails (e.g. the internet is down), keep retrying every
+        // five minutes for up to twelve hours, unless another command supersedes it.
+        const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
+        const MAX_RETRIES: u32 = 12 * 60 / 5;
+        tokio::time::sleep(Duration::from_secs(seconds)).await;
+        for attempt in 0..=MAX_RETRIES {
+            if FLOODLIGHT_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            match run_floodlight_script(false).await {
+                Ok(_) => return,
+                Err(error) => eprintln!(
+                    "{} Grindlewald timed floodlight off failed (attempt {}): {error}",
+                    chrono::Local::now().to_rfc3339(),
+                    attempt + 1
+                ),
+            }
+            if attempt < MAX_RETRIES {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+        }
+    });
+    let minutes = seconds / 60;
+    Ok(format!("Floodlights on for {minutes} min"))
 }
 
 #[tauri::command]

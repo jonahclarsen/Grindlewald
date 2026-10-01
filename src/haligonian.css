@@ -104,7 +104,7 @@ h3 { font-size: 12px; color: var(--ice); }
 .floodlight-card { margin-bottom: 9px; padding: 8px 10px; }
 .floodlight-title strong { font-size: 12px; }
 .mode-icon { color: var(--ice); }
-.floodlight-actions { grid-template-columns: repeat(2, 58px); gap: 5px; }
+.floodlight-actions { grid-template-columns: 58px 58px auto; gap: 5px; }
 .picker-card { padding: 0 11px 9px; }
 .custom-picker { margin-bottom: 9px; }
 .picker-card.color-card, .picker-card.white-card { background: var(--panel); }
