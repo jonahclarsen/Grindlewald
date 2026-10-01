@@ -316,7 +316,7 @@ async fn set_floodlights(
         }
     });
     let minutes = seconds / 60;
-    Ok(format!("Floodlights on for {minutes} min"))
+    Ok(format!("Floodlights on for {minutes}m"))
 }
 
 #[tauri::command]
