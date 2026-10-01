@@ -463,7 +463,11 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function showPage(pageId) {
-  if (pageId === "automations-page") void refreshHomeNetwork();
+  if (pageId === "automations-page") {
+    settings.schedules.forEach((schedule) => collapsedScheduleIds.add(schedule.id));
+    renderSchedules();
+    void refreshHomeNetwork();
+  }
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === pageId));
 }
