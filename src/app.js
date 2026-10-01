@@ -254,7 +254,7 @@ function renderFloodlightTimer({ state, error, attempt, nextRetryAt }) {
   const note = $("#floodlight-retry");
   if (state === "retrying") {
     const time = new Date(nextRetryAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    note.textContent = `Couldn’t turn off after 5m (attempt ${attempt}). Retrying at ${time}, for up to 12 hours.`;
+    note.textContent = `Couldn’t turn off after 5 min (attempt ${attempt}). Retrying at ${time}, for up to 12 hours.`;
     note.title = summarizeError(error);
     note.hidden = false;
   } else if (state === "failed") {
@@ -262,7 +262,7 @@ function renderFloodlightTimer({ state, error, attempt, nextRetryAt }) {
     setStatus(`Gave up turning floodlights off after 12 hours: ${error}`, "error");
   } else {
     note.hidden = true;
-    if (state === "off") setStatus("Floodlights off (5m timer)");
+    if (state === "off") setStatus("Floodlights off (5 min timer)");
   }
 }
 
@@ -382,7 +382,7 @@ async function callBackend(command, args = {}) {
       { name: "Govee H6005", identifier: "local-ble-id-1" },
       { name: "Govee new lamp", identifier: "LOCAL-DEMO-ID" },
     ];
-    if (command === "set_floodlights") return args.on && args.offAfterSeconds ? `Floodlights on for ${args.offAfterSeconds / 60}m` : `Floodlights ${args.on ? "on" : "off"}`;
+    if (command === "set_floodlights") return args.on && args.offAfterSeconds ? `Floodlights on for ${args.offAfterSeconds / 60} min` : `Floodlights ${args.on ? "on" : "off"}`;
     if (command === "privileged_service_status") return privilegedService;
     if (command === "install_privileged_service") {
       privilegedService = { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" };
