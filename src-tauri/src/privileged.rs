@@ -38,6 +38,8 @@ struct ApprovedJob {
 struct InstallReceipt {
     application_digest: String,
     helper_digest: String,
+    #[serde(default)]
+    helper_version: Option<String>,
 }
 
 pub fn maybe_run_helper() -> Option<i32> {
@@ -94,8 +96,9 @@ pub fn service_status() -> ServiceStatus {
         };
     }
 
-    // Signing the standalone helper changes its bytes. A root-owned receipt
-    // binds those bytes to the original app, without relying on app versions.
+    // The root-owned receipt verifies the installed helper's signed bytes.
+    // Freshness depends only on privileged helper source, so unrelated app
+    // rebuilds do not ask the user to install the same helper implementation.
     let receipt = fs::symlink_metadata(RECEIPT_PATH)
         .ok()
         .filter(|value| value.is_file() && value.uid() == 0 && value.mode() & 0o022 == 0)
@@ -104,12 +107,7 @@ pub fn service_status() -> ServiceStatus {
     let healthy = receipt.as_ref().is_some_and(|receipt| {
         file_digest(Path::new(HELPER_PATH)).is_ok_and(|digest| digest == receipt.helper_digest)
     });
-    let current = healthy
-        && std::env::current_exe()
-            .ok()
-            .and_then(|executable| file_digest(&executable).ok())
-            .zip(receipt)
-            .is_some_and(|(application, receipt)| application == receipt.application_digest);
+    let current = helper_is_current(healthy, receipt.as_ref(), &helper_version());
     ServiceStatus {
         installed: true,
         healthy,
@@ -238,7 +236,7 @@ pub async fn run_job(id: &str) -> Result<String, String> {
 fn dispatch_helper(arguments: &[String]) -> Result<i32, String> {
     match arguments {
         [operation] if operation == "status" => {
-            print!("{}", helper_version());
+            println!("{}", helper_version());
             Ok(0)
         }
         [operation, username, application_digest] if operation == "finish-install" => {
@@ -254,6 +252,7 @@ fn dispatch_helper(arguments: &[String]) -> Result<i32, String> {
             let receipt = InstallReceipt {
                 application_digest: application_digest.to_ascii_lowercase(),
                 helper_digest: file_digest(Path::new(HELPER_PATH))?,
+                helper_version: Some(helper_version()),
             };
             let temporary = PathBuf::from(format!("{RECEIPT_PATH}.new-{}", std::process::id()));
             let contents = serde_json::to_vec(&receipt).map_err(|error| error.to_string())?;
@@ -552,8 +551,18 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+fn helper_source_version(source: &str) -> String {
+    // Unit tests are not part of the installed helper implementation.
+    let implementation = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+    sha256_hex(implementation.as_bytes())
+}
+
 fn helper_version() -> String {
-    format!("{}\n", env!("CARGO_PKG_VERSION"))
+    helper_source_version(include_str!("privileged.rs"))
+}
+
+fn helper_is_current(healthy: bool, receipt: Option<&InstallReceipt>, version: &str) -> bool {
+    healthy && receipt.is_some_and(|receipt| receipt.helper_version.as_deref() == Some(version))
 }
 
 fn output_error(context: &str, output: &Output) -> String {
@@ -568,6 +577,52 @@ fn output_error(context: &str, output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unrelated_app_rebuilds_do_not_invalidate_the_helper() {
+        let version = helper_version();
+        for application_digest in ["old-app", "rebuilt-app"] {
+            let receipt = InstallReceipt {
+                application_digest: application_digest.into(),
+                helper_digest: "signed-helper".into(),
+                helper_version: Some(version.clone()),
+            };
+            assert!(helper_is_current(true, Some(&receipt), &version));
+            assert!(!helper_is_current(true, Some(&receipt), "changed-helper"));
+            assert!(!helper_is_current(false, Some(&receipt), &version));
+        }
+    }
+
+    #[test]
+    fn helper_source_fingerprint_changes_only_for_implementation_changes() {
+        let source = "fn helper() {}\n#[cfg(test)]\nmod tests { old_test }";
+        let changed_test = "fn helper() {}\n#[cfg(test)]\nmod tests { new_test }";
+        let changed_helper = "fn helper() { changed(); }\n#[cfg(test)]\nmod tests { old_test }";
+        assert_eq!(
+            helper_source_version(source),
+            helper_source_version(changed_test)
+        );
+        assert_ne!(
+            helper_source_version(source),
+            helper_source_version(changed_helper)
+        );
+        assert_eq!(helper_version().len(), 64);
+    }
+
+    #[test]
+    fn legacy_receipts_need_one_update_and_new_receipts_round_trip() {
+        let mut receipt: InstallReceipt = serde_json::from_value(serde_json::json!({
+            "application_digest": "old-app", "helper_digest": "signed-helper"
+        }))
+        .unwrap();
+        assert!(receipt.helper_version.is_none());
+        assert!(!helper_is_current(true, Some(&receipt), &helper_version()));
+        receipt.helper_version = Some(helper_version());
+        let restored: InstallReceipt =
+            serde_json::from_slice(&serde_json::to_vec(&receipt).unwrap()).unwrap();
+        assert!(helper_is_current(true, Some(&restored), &helper_version()));
+        assert!(!helper_is_current(true, None, &helper_version()));
+    }
 
     #[test]
     fn job_ids_and_usernames_reject_shell_syntax_and_paths() {

@@ -176,6 +176,8 @@ Protocol references: [H6005 write-up](https://github.com/egold555/Govee-Reverse-
 
 H6001 has documented built-in music, scene, and DIY packets. H6005 has confirmed instant music streaming but its scene and DIY payloads remain undocumented. The collapsed **Experimental modes** panel provides known H6001 candidates, some newer-Govee music candidates, and an editable hexadecimal payload. It always fixes the outer command to `33 05`, writes only the normal light-control characteristic, targets one selected light, and cannot access firmware or OTA characteristics. Use **Restore color** if a trial leaves a bulb in an unexpected mode.
 
+Helper updates are requested when the privileged helper implementation changes. UI and lighting rebuilds preserve the helper registration and approved administrator commands. The installed helper still has its signed binary digest verified against a root-owned receipt. Installations created before helper-specific fingerprints need one helper update to migrate the receipt. Changing an approved automation's command text still requires reapproval.
+
 ## Privacy and repository safety
 
 No device identifier, credential, API key, user automation, or personal filesystem path is included in this repository. The screenshots use synthetic demo devices. Before publishing changes, inspect staged files and keep all real configuration in Application Support.
