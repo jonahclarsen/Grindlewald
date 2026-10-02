@@ -532,25 +532,28 @@ impl SharedState {
             schedule.time,
             schedule.floodlights
         );
-        let targets = schedule.light_targets();
-        let preset_name = schedule.preset.clone();
         let state = self.clone();
+        let light_schedule = schedule.clone();
         let lights = async move {
-            if targets.is_empty() {
-                return Ok("Lights unchanged".into());
-            }
-            let mut messages = Vec::new();
-            for target in targets {
-                messages.push(
-                    state
-                        .execute(ControlCommand::Preset {
-                            name: preset_name.clone(),
-                            device: target,
-                        })
-                        .await?,
+            let started = tokio::time::Instant::now();
+            let (result, any_succeeded) = state.run_schedule_lights(&light_schedule).await;
+            if result.is_err() && !any_succeeded {
+                eprintln!(
+                    "Grindlewald automation lights will retry every 15 minutes for six hours"
                 );
+                tauri::async_runtime::spawn(async move {
+                    retry_automation_lights(started, || async {
+                        let (result, any_succeeded) =
+                            state.run_schedule_lights(&light_schedule).await;
+                        if let Err(error) = result {
+                            eprintln!("Grindlewald automation light retry failed: {error}");
+                        }
+                        any_succeeded
+                    })
+                    .await;
+                });
             }
-            Ok::<_, String>(messages.join(", "))
+            result
         };
 
         let floodlights = async move {
@@ -641,6 +644,36 @@ impl SharedState {
         }
     }
 
+    // Try every target even when the first one is unavailable. Shell and floodlight
+    // actions stay outside this method so background retries cannot repeat them.
+    async fn run_schedule_lights(&self, schedule: &Schedule) -> (Result<String, String>, bool) {
+        let targets = schedule.light_targets();
+        if targets.is_empty() {
+            return (Ok("Lights unchanged".into()), false);
+        }
+        let mut messages = Vec::new();
+        let mut errors = Vec::new();
+        for target in targets {
+            match self
+                .execute(ControlCommand::Preset {
+                    name: schedule.preset.clone(),
+                    device: target,
+                })
+                .await
+            {
+                Ok(message) => messages.push(message),
+                Err(error) => errors.push(error),
+            }
+        }
+        let any_succeeded = !messages.is_empty();
+        let result = if errors.is_empty() {
+            Ok(messages.join(", "))
+        } else {
+            Err(errors.join("; "))
+        };
+        (result, any_succeeded)
+    }
+
     fn arm_idle_disconnect(&self, hold_seconds: u64) {
         let generation = self.activity_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let mut cancelled = self.disconnect_signal.subscribe();
@@ -698,6 +731,32 @@ impl SharedState {
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
+    }
+}
+
+const AUTOMATION_LIGHT_RETRY_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const AUTOMATION_LIGHT_RETRY_WINDOW: Duration = Duration::from_secs(6 * 60 * 60);
+
+async fn retry_automation_lights<F, Fut>(started: tokio::time::Instant, mut attempt: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = started + AUTOMATION_LIGHT_RETRY_WINDOW;
+    let mut next = started + AUTOMATION_LIGHT_RETRY_INTERVAL;
+    while next <= deadline {
+        tokio::time::sleep_until(next).await;
+        // Do not replay expired automations after a long sleep or a slow attempt.
+        if tokio::time::Instant::now() > deadline {
+            break;
+        }
+        if attempt().await {
+            break;
+        }
+        next += AUTOMATION_LIGHT_RETRY_INTERVAL;
+        while next < tokio::time::Instant::now() {
+            next += AUTOMATION_LIGHT_RETRY_INTERVAL;
+        }
     }
 }
 
@@ -796,6 +855,95 @@ mod tests {
             assert!(result.contains("Shell command completed"));
         }
         assert!(!state.settings_path().exists());
+    }
+
+    #[tokio::test]
+    async fn shell_commands_run_once_even_when_light_actions_fail() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        let marker = directory.path().join("shell-runs");
+        let schedule = serde_json::from_value(serde_json::json!({
+            "id": "unavailable", "name": "Unavailable lights", "time": "06:00",
+            "preset": "daytime", "allLights": true,
+            "shellCommand": format!("printf x >> '{}'", marker.display())
+        }))
+        .unwrap();
+        assert!(
+            state
+                .run_schedule(schedule)
+                .await
+                .unwrap_err()
+                .contains("No lights connected")
+        );
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "x");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn light_retries_run_every_fifteen_minutes_for_six_hours() {
+        let started = tokio::time::Instant::now();
+        let mut attempts = 0;
+        super::retry_automation_lights(started, || {
+            attempts += 1;
+            assert_eq!(
+                tokio::time::Instant::now() - started,
+                super::AUTOMATION_LIGHT_RETRY_INTERVAL * attempts
+            );
+            std::future::ready(false)
+        })
+        .await;
+        assert_eq!(attempts, 24);
+        assert_eq!(
+            tokio::time::Instant::now() - started,
+            super::AUTOMATION_LIGHT_RETRY_WINDOW
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_light_attempts_do_not_shift_the_retry_schedule() {
+        let started = tokio::time::Instant::now();
+        let mut attempts = 0;
+        super::retry_automation_lights(started, || {
+            attempts += 1;
+            assert_eq!(
+                tokio::time::Instant::now() - started,
+                super::AUTOMATION_LIGHT_RETRY_INTERVAL * attempts
+            );
+            async {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                false
+            }
+        })
+        .await;
+        assert_eq!(attempts, 24);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn light_retries_stop_as_soon_as_a_target_succeeds() {
+        let started = tokio::time::Instant::now();
+        let mut attempts = 0;
+        super::retry_automation_lights(started, || {
+            attempts += 1;
+            std::future::ready(attempts == 2)
+        })
+        .await;
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            tokio::time::Instant::now() - started,
+            super::AUTOMATION_LIGHT_RETRY_INTERVAL * 2
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_light_retries_do_not_run_after_sleep() {
+        let started = tokio::time::Instant::now();
+        tokio::time::advance(
+            super::AUTOMATION_LIGHT_RETRY_WINDOW + std::time::Duration::from_secs(1),
+        )
+        .await;
+        super::retry_automation_lights(started, || async {
+            panic!("expired automation must not run");
+        })
+        .await;
     }
 
     #[test]
