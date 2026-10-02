@@ -2,7 +2,8 @@ use std::{collections::HashMap, time::Duration};
 
 use btleplug::{
     api::{
-        Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
+        Central, CentralEvent, CentralState, Characteristic, Manager as _, Peripheral as _,
+        ScanFilter, WriteType,
     },
     platform::{Adapter, Manager, Peripheral},
 };
@@ -25,7 +26,11 @@ pub struct DiscoveredDevice {
     pub identifier: String,
 }
 
+pub const BLUETOOTH_OFF_MESSAGE: &str = "Bluetooth is off; lights unchanged";
+
 pub struct BleController {
+    #[cfg(test)]
+    pub(crate) test_power_state: CentralState,
     adapter: Option<Adapter>,
     connections: HashMap<String, Peripheral>,
     light_states: HashMap<String, LightState>,
@@ -41,6 +46,8 @@ impl Default for BleController {
 impl BleController {
     pub fn new() -> Self {
         Self {
+            #[cfg(test)]
+            test_power_state: CentralState::PoweredOn,
             adapter: None,
             connections: HashMap::new(),
             light_states: HashMap::new(),
@@ -49,6 +56,9 @@ impl BleController {
     }
 
     pub async fn discover(&mut self) -> Result<Vec<DiscoveredDevice>, String> {
+        if self.bluetooth_powered_off().await? {
+            return Ok(Vec::new());
+        }
         let adapter = self.adapter().await?;
         adapter
             .start_scan(ScanFilter::default())
@@ -99,11 +109,30 @@ impl BleController {
         Ok(adapter)
     }
 
+    pub async fn bluetooth_powered_off(&mut self) -> Result<bool, String> {
+        #[cfg(test)]
+        {
+            return Ok(self.test_power_state == CentralState::PoweredOff);
+        }
+        #[cfg(not(test))]
+        {
+            let adapter = self.adapter().await?;
+            let state = adapter
+                .adapter_state()
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(state == CentralState::PoweredOff)
+        }
+    }
+
     pub async fn apply(
         &mut self,
         settings: &Settings,
         command: &ControlCommand,
     ) -> Result<String, String> {
+        if self.bluetooth_powered_off().await? {
+            return Ok(BLUETOOTH_OFF_MESSAGE.into());
+        }
         let selected: Vec<DeviceConfig> = settings
             .devices
             .iter()
@@ -296,6 +325,16 @@ impl BleController {
     }
 
     pub async fn connected_count(&self) -> Result<usize, String> {
+        if let Some(adapter) = &self.adapter {
+            if adapter
+                .adapter_state()
+                .await
+                .map_err(|error| error.to_string())?
+                == CentralState::PoweredOff
+            {
+                return Ok(0);
+            }
+        }
         let results = join_all(
             self.connections
                 .values()
@@ -312,6 +351,13 @@ impl BleController {
     }
 
     pub async fn disconnect_all(&mut self) -> Result<(), String> {
+        if self.adapter.is_some() && self.bluetooth_powered_off().await? {
+            let identifiers: Vec<_> = self.connections.keys().cloned().collect();
+            for identifier in identifiers {
+                self.forget_connection(&identifier);
+            }
+            return Ok(());
+        }
         if let Some(adapter) = &self.adapter {
             let _ = adapter.stop_scan().await;
         }
@@ -348,6 +394,9 @@ impl BleController {
     }
 
     pub async fn keep_alive(&mut self) {
+        if self.connections.is_empty() || self.bluetooth_powered_off().await.unwrap_or(true) {
+            return;
+        }
         let Ok(characteristic_uuid) = Uuid::parse_str(CONTROL_CHARACTERISTIC) else {
             return;
         };
@@ -544,6 +593,48 @@ fn frames_for(
 mod tests {
     use super::*;
     use crate::protocol::DeviceProfile;
+
+    #[tokio::test]
+    async fn powered_off_bluetooth_skips_discovery_connections_and_writes() {
+        let mut controller = BleController::new();
+        controller.test_power_state = CentralState::PoweredOff;
+        let settings = Settings {
+            devices: vec![scan_device("Test light", "test-light")],
+            ..Settings::default()
+        };
+        assert!(controller.discover().await.unwrap().is_empty());
+        assert_eq!(
+            controller
+                .apply(
+                    &settings,
+                    &ControlCommand::Power {
+                        on: true,
+                        device: None,
+                    }
+                )
+                .await
+                .unwrap(),
+            BLUETOOTH_OFF_MESSAGE
+        );
+        controller.keep_alive().await;
+        assert!(controller.adapter.is_none());
+        assert!(controller.connections.is_empty());
+        assert!(controller.light_states.is_empty());
+        controller.test_power_state = CentralState::PoweredOn;
+        assert!(
+            controller
+                .apply(
+                    &Settings::default(),
+                    &ControlCommand::Power {
+                        on: true,
+                        device: None,
+                    }
+                )
+                .await
+                .unwrap_err()
+                .contains("No lights connected")
+        );
+    }
 
     fn scan_device(name: &str, identifier: &str) -> DeviceConfig {
         DeviceConfig {

@@ -12,7 +12,7 @@ use chrono::Local;
 use tokio::sync::{Mutex, watch};
 
 use crate::{
-    ble::{BleController, DiscoveredDevice},
+    ble::{BLUETOOTH_OFF_MESSAGE, BleController, DiscoveredDevice},
     breathing::{
         COLOR_COUNT, ColorCycle, color_at_position, color_step_from_degrees, frame_interval,
         next_frame_deadline, resolve_interval_ms,
@@ -189,6 +189,10 @@ impl SharedState {
     }
 
     async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
+        // Check before changing effects, reading settings, or remembering a preset.
+        if self.controller.lock().await.bluetooth_powered_off().await? {
+            return Ok(BLUETOOTH_OFF_MESSAGE.into());
+        }
         if let ControlCommand::TraceBreathing {
             seconds,
             cache_characteristic,
@@ -263,6 +267,9 @@ impl SharedState {
             .await
             .apply(&settings, &command)
             .await;
+        if result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
+            return result;
+        }
         self.arm_idle_disconnect(settings.connection_hold_seconds);
         if preset
             && result.is_ok()
@@ -287,7 +294,7 @@ impl SharedState {
                 return Err(error);
             }
         };
-        if let Err(error) = self
+        let result = self
             .controller
             .lock()
             .await
@@ -299,8 +306,13 @@ impl SharedState {
                     device: device.clone(),
                 },
             )
-            .await
-        {
+            .await;
+        if result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
+            self.party_active.store(false, Ordering::SeqCst);
+            self.breathing_frames.send_replace(None);
+            return result;
+        }
+        if let Err(error) = result {
             self.party_active.store(false, Ordering::SeqCst);
             self.breathing_frames.send_replace(None);
             self.arm_idle_disconnect(settings.connection_hold_seconds);
@@ -334,11 +346,13 @@ impl SharedState {
                     _ = cancelled.changed() => break,
                     result = controller.apply(&settings, &command) => result,
                 };
-                if result.is_err() {
+                if result.is_err() || result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
                     state.breathing_frames.send_replace(None);
-                    state.arm_idle_disconnect(settings.connection_hold_seconds);
+                    if result.is_err() {
+                        state.arm_idle_disconnect(settings.connection_hold_seconds);
+                    }
                     break;
                 }
                 color_index = (color_index + 1) % COLORS.len();
@@ -376,6 +390,11 @@ impl SharedState {
                 },
             )
             .await;
+        if result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
+            self.party_active.store(false, Ordering::SeqCst);
+            self.breathing_frames.send_replace(None);
+            return result;
+        }
         if let Err(error) = result {
             self.party_active.store(false, Ordering::SeqCst);
             self.breathing_frames.send_replace(None);
@@ -432,11 +451,13 @@ impl SharedState {
                 if state.party_generation.load(Ordering::SeqCst) != generation {
                     break;
                 }
-                if result.is_err() {
+                if result.is_err() || result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
                     state.party_active.store(false, Ordering::SeqCst);
                     state.breathing_frames.send_replace(None);
-                    state.arm_idle_disconnect(settings.connection_hold_seconds);
+                    if result.is_err() {
+                        state.arm_idle_disconnect(settings.connection_hold_seconds);
+                    }
                     break;
                 }
                 state.publish_breathing(cycle.position, generation, request_id);
@@ -462,7 +483,9 @@ impl SharedState {
             .await
             .apply(&settings, &command)
             .await;
-        self.arm_idle_disconnect(settings.connection_hold_seconds);
+        if result.as_deref() != Ok(BLUETOOTH_OFF_MESSAGE) {
+            self.arm_idle_disconnect(settings.connection_hold_seconds);
+        }
         result.map(|_| "Effect stopped".into())
     }
 
@@ -855,6 +878,83 @@ mod tests {
             assert!(result.contains("Shell command completed"));
         }
         assert!(!state.settings_path().exists());
+    }
+
+    #[tokio::test]
+    async fn bluetooth_off_commands_do_not_change_settings_or_start_effects() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        state.controller.lock().await.test_power_state = btleplug::api::CentralState::PoweredOff;
+        for command in [
+            ControlCommand::Preset {
+                name: "daytime".into(),
+                device: None,
+            },
+            ControlCommand::Power {
+                on: true,
+                device: None,
+            },
+            ControlCommand::Party { device: None },
+            ControlCommand::Breathe {
+                interval_ms: Some(500),
+                cycle_seconds: None,
+                pace_seconds: None,
+                color_step: 1,
+                hue_step_degrees: None,
+                device: None,
+            },
+        ] {
+            assert_eq!(
+                state.execute(command).await.unwrap(),
+                super::BLUETOOTH_OFF_MESSAGE
+            );
+        }
+        assert!(state.discover().await.unwrap().is_empty());
+        assert!(!state.settings_path.exists());
+        assert!(!state.party_active.load(Ordering::SeqCst));
+        assert_eq!(state.party_generation.load(Ordering::SeqCst), 0);
+        assert_eq!(state.activity_generation.load(Ordering::SeqCst), 0);
+        assert!(state.current_breathing().is_none());
+    }
+
+    #[tokio::test]
+    async fn effects_do_not_start_if_bluetooth_turns_off_during_setup() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        state.controller.lock().await.test_power_state = btleplug::api::CentralState::PoweredOff;
+        // Call setup directly to cover Bluetooth turning off after execute's check.
+        assert_eq!(
+            state.start_party(None).await.unwrap(),
+            super::BLUETOOTH_OFF_MESSAGE
+        );
+        assert!(!state.party_active.load(Ordering::SeqCst));
+        assert_eq!(
+            state.start_breathing(500, 1, None).await.unwrap(),
+            super::BLUETOOTH_OFF_MESSAGE
+        );
+        assert!(!state.party_active.load(Ordering::SeqCst));
+        assert!(state.current_breathing().is_none());
+        assert!(!state.settings_path.exists());
+    }
+
+    #[tokio::test]
+    async fn bluetooth_off_automations_still_run_shell_without_light_retries() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        state.controller.lock().await.test_power_state = btleplug::api::CentralState::PoweredOff;
+        let marker = directory.path().join("shell-runs");
+        let schedule = serde_json::from_value(serde_json::json!({
+            "id": "bluetooth-off", "name": "Bluetooth off", "time": "06:00",
+            "preset": "daytime", "allLights": true,
+            "shellCommand": format!("printf x >> '{}'", marker.display())
+        }))
+        .unwrap();
+        let result = state.run_schedule(schedule).await.unwrap();
+        assert!(result.contains(super::BLUETOOTH_OFF_MESSAGE));
+        assert!(result.contains("Shell command completed"));
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "x");
+        assert_eq!(state.activity_generation.load(Ordering::SeqCst), 0);
+        assert!(!state.settings_path.exists());
     }
 
     #[tokio::test]
