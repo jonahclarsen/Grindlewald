@@ -203,3 +203,10 @@ code { color: #d5c9f5; font-family: ui-monospace, SFMono-Regular, Menlo, monospa
 .connection-button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 #connection-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .connection-control.connected #connection-dot { box-shadow: 0 0 8px var(--green); }
+
+.white-breathing-controls { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+#white-breathing-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.white-breathing-controls .pace-control { grid-template-columns: 65px minmax(0, 1fr) 88px; }
+.white-breathing-hint { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
+
+.white-breathing-controls .pace-control output { width: auto; }

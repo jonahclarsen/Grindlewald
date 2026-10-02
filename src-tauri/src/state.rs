@@ -15,7 +15,8 @@ use crate::{
     ble::{BLUETOOTH_OFF_MESSAGE, BleController, DiscoveredDevice},
     breathing::{
         COLOR_COUNT, ColorCycle, color_at_position, color_step_from_degrees, frame_interval,
-        next_frame_deadline, resolve_interval_ms,
+        next_frame_deadline, resolve_interval_ms, validate_white_sweep_seconds, white_at_kelvin,
+        white_kelvin_at_phase, white_kelvin_from_hex, white_phase,
     },
     command::ControlCommand,
     privileged,
@@ -33,6 +34,7 @@ pub struct ConnectionStatus {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BreathingPlayback {
+    pub mode: LightMode,
     pub position: u16,
     pub generation: u64,
     pub request_id: u64,
@@ -65,6 +67,7 @@ pub struct SharedState {
     party_generation: Arc<AtomicU64>,
     party_active: Arc<AtomicBool>,
     disconnect_signal: watch::Sender<()>,
+    manual_light_signal: watch::Sender<()>,
     disconnecting: Arc<AtomicBool>,
     breathing_frames: watch::Sender<Option<BreathingPlayback>>,
     breathing_seek: watch::Sender<Option<BreathingSeek>>,
@@ -80,6 +83,7 @@ impl SharedState {
             party_generation: Arc::new(AtomicU64::new(0)),
             party_active: Arc::new(AtomicBool::new(false)),
             disconnect_signal: watch::channel(()).0,
+            manual_light_signal: watch::channel(()).0,
             disconnecting: Arc::new(AtomicBool::new(false)),
             breathing_frames: watch::channel(None).0,
             breathing_seek: watch::channel(None).0,
@@ -112,7 +116,18 @@ impl SharedState {
         })
     }
 
+    #[cfg(test)]
     fn publish_breathing(&self, position: u16, generation: u64, request_id: u64) {
+        self.publish_breathing_mode(position, generation, request_id, LightMode::Color);
+    }
+
+    fn publish_breathing_mode(
+        &self,
+        position: u16,
+        generation: u64,
+        request_id: u64,
+        mode: LightMode,
+    ) {
         if self.party_active.load(Ordering::SeqCst)
             && self.party_generation.load(Ordering::SeqCst) == generation
         {
@@ -123,6 +138,7 @@ impl SharedState {
                 .map_or(1, |frame| frame.frame_id + 1);
             crate::timing::record("publish", std::time::Instant::now(), None, true);
             self.breathing_frames.send_replace(Some(BreathingPlayback {
+                mode,
                 position,
                 generation,
                 request_id,
@@ -170,6 +186,7 @@ impl SharedState {
         if self.disconnecting.swap(true, Ordering::SeqCst) {
             return Err("Disconnect already in progress".into());
         }
+        self.manual_light_signal.send_replace(());
         self.disconnect_signal.send_replace(());
         self.party_active.store(false, Ordering::SeqCst);
         self.breathing_frames.send_replace(None);
@@ -181,11 +198,35 @@ impl SharedState {
     }
 
     pub async fn execute(&self, command: ControlCommand) -> Result<String, String> {
+        let manual = !matches!(command, ControlCommand::TraceBreathing { .. });
+        if manual {
+            self.manual_light_signal.send_replace(());
+        }
+        self.execute_command(command, manual).await
+    }
+
+    // Automation attempts do not cancel each other's pending retries.
+    async fn execute_automatic(&self, command: ControlCommand) -> Result<String, String> {
+        self.execute_command(command, false).await
+    }
+
+    async fn execute_command(
+        &self,
+        command: ControlCommand,
+        manual: bool,
+    ) -> Result<String, String> {
         let cancelled = self.disconnect_signal.subscribe();
         if self.disconnecting.load(Ordering::SeqCst) {
             return Err("Disconnect in progress".into());
         }
-        until_disconnect(cancelled, self.execute_inner(command)).await
+        // Subscribe before waiting for the lock, including cancelled-scan cleanup.
+        until_disconnect(cancelled, async {
+            if manual {
+                self.controller.lock().await.cancel_pending_scan().await;
+            }
+            self.execute_inner(command).await
+        })
+        .await
     }
 
     async fn execute_inner(&self, command: ControlCommand) -> Result<String, String> {
@@ -247,6 +288,16 @@ impl SharedState {
                 .unwrap_or(*color_step);
             let interval = resolve_interval_ms(*interval_ms, *pace_seconds, *cycle_seconds, step)?;
             return self.start_breathing(interval, step, device.clone()).await;
+        }
+        if let ControlCommand::BreatheWhite {
+            sweep_seconds,
+            device,
+        } = &command
+        {
+            validate_white_sweep_seconds(*sweep_seconds)?;
+            return self
+                .start_breathing_mode(350, 1, device.clone(), LightMode::White, *sweep_seconds)
+                .await;
         }
         if matches!(
             command,
@@ -367,8 +418,28 @@ impl SharedState {
         color_step: u16,
         device: Option<String>,
     ) -> Result<String, String> {
+        self.start_breathing_mode(interval_ms, color_step, device, LightMode::Color, 30)
+            .await
+    }
+
+    async fn start_breathing_mode(
+        &self,
+        interval_ms: u32,
+        color_step: u16,
+        device: Option<String>,
+        mode: LightMode,
+        sweep_seconds: u32,
+    ) -> Result<String, String> {
         let settings = self.load_settings()?;
-        let origin = fastrand::u16(0..COLOR_COUNT);
+        let origin = if mode == LightMode::White {
+            let kelvin = match settings.white_kelvin {
+                Some(kelvin) => kelvin.clamp(2000, 9000),
+                None => white_kelvin_from_hex(&settings.white)?,
+            };
+            ((f64::from(kelvin - 2000) / 7000.0) * f64::from(COLOR_COUNT / 2)).round() as u16
+        } else {
+            fastrand::u16(0..COLOR_COUNT)
+        };
         let mut cycle = ColorCycle::new(origin, color_step)?;
         let interval = frame_interval(interval_ms)?;
         if self.party_active.swap(true, Ordering::SeqCst) {
@@ -384,10 +455,7 @@ impl SharedState {
             .await
             .apply(
                 &settings,
-                &ControlCommand::BreathingFrame {
-                    value: color_at_position(cycle.position),
-                    device: device.clone(),
-                },
+                &breathing_command(mode, cycle.position, device.clone()),
             )
             .await;
         if result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
@@ -401,9 +469,11 @@ impl SharedState {
             self.arm_idle_disconnect(settings.connection_hold_seconds);
             return Err(error);
         }
-        self.publish_breathing(cycle.position, generation, request_id);
+        self.publish_breathing_mode(cycle.position, generation, request_id, mode);
         // Connection setup is not part of the first color interval.
         let mut deadline = tokio::time::Instant::now() + interval;
+        let mut white_started = tokio::time::Instant::now();
+        let mut white_origin = origin;
         let state = self.clone();
         let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
@@ -419,7 +489,12 @@ impl SharedState {
                 }
                 if !moved {
                     crate::timing::record("timer_lateness", deadline.into_std(), None, true);
-                    cycle.advance();
+                    if mode == LightMode::White {
+                        cycle.position =
+                            white_phase(white_origin, white_started.elapsed(), sweep_seconds);
+                    } else {
+                        cycle.advance();
+                    }
                 }
                 let lock_started = std::time::Instant::now();
                 let mut controller = state.controller.lock().await;
@@ -433,13 +508,12 @@ impl SharedState {
                     let latest = *seek.borrow_and_update();
                     if let Some(latest) = latest.filter(|seek| seek.generation == generation) {
                         cycle.position = latest.position;
+                        white_origin = latest.position;
+                        white_started = tokio::time::Instant::now();
                         request_id = latest.request_id;
                     }
                 }
-                let command = ControlCommand::BreathingFrame {
-                    value: color_at_position(cycle.position),
-                    device: device.clone(),
-                };
+                let command = breathing_command(mode, cycle.position, device.clone());
                 let started = tokio::time::Instant::now();
                 let result = tokio::select! {
                     biased;
@@ -460,22 +534,37 @@ impl SharedState {
                     }
                     break;
                 }
-                state.publish_breathing(cycle.position, generation, request_id);
+                state.publish_breathing_mode(cycle.position, generation, request_id, mode);
             }
         });
-        Ok("Breathing".into())
+        Ok(if mode == LightMode::White {
+            "White breathing"
+        } else {
+            "Breathing"
+        }
+        .into())
     }
 
     async fn stop_effect(&self) -> Result<String, String> {
+        let effect_mode = self.current_breathing().map(|frame| frame.mode);
         self.party_active.store(false, Ordering::SeqCst);
         self.breathing_frames.send_replace(None);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
-        let command = ControlCommand::Color {
-            value: settings.color.clone(),
-            brightness: Some(settings.brightness),
-            device: None,
+        let command = if effect_mode.unwrap_or(settings.mode) == LightMode::White {
+            ControlCommand::White {
+                value: settings.white.clone(),
+                kelvin: settings.white_kelvin,
+                brightness: Some(settings.brightness),
+                device: None,
+            }
+        } else {
+            ControlCommand::Color {
+                value: settings.color.clone(),
+                brightness: Some(settings.brightness),
+                device: None,
+            }
         };
         let result = self
             .controller
@@ -490,6 +579,7 @@ impl SharedState {
     }
 
     pub async fn run_schedule_by_id(&self, id: &str) -> Result<String, String> {
+        self.manual_light_signal.send_replace(());
         let settings = self.load_settings()?;
         let schedule = settings
             .schedules
@@ -557,15 +647,21 @@ impl SharedState {
         );
         let state = self.clone();
         let light_schedule = schedule.clone();
+        let mut manual_change = self.manual_light_signal.subscribe();
         let lights = async move {
             let started = tokio::time::Instant::now();
-            let (result, any_succeeded) = state.run_schedule_lights(&light_schedule).await;
+            let attempt = tokio::select! {
+                biased;
+                _ = manual_change.changed() => return Ok("Automation lights cancelled by manual control".into()),
+                result = state.run_schedule_lights(&light_schedule) => result,
+            };
+            let (result, any_succeeded) = attempt;
             if result.is_err() && !any_succeeded {
                 eprintln!(
                     "Grindlewald automation lights will retry every 15 minutes for six hours"
                 );
                 tauri::async_runtime::spawn(async move {
-                    retry_automation_lights(started, || async {
+                    retry_automation_lights(started, manual_change, || async {
                         let (result, any_succeeded) =
                             state.run_schedule_lights(&light_schedule).await;
                         if let Err(error) = result {
@@ -678,7 +774,7 @@ impl SharedState {
         let mut errors = Vec::new();
         for target in targets {
             match self
-                .execute(ControlCommand::Preset {
+                .execute_automatic(ControlCommand::Preset {
                     name: schedule.preset.clone(),
                     device: target,
                 })
@@ -757,23 +853,52 @@ impl SharedState {
     }
 }
 
+fn breathing_command(mode: LightMode, position: u16, device: Option<String>) -> ControlCommand {
+    if mode == LightMode::White {
+        let kelvin = white_kelvin_at_phase(position);
+        ControlCommand::White {
+            value: white_at_kelvin(kelvin),
+            kelvin: Some(kelvin),
+            brightness: None,
+            device,
+        }
+    } else {
+        ControlCommand::BreathingFrame {
+            value: color_at_position(position),
+            device,
+        }
+    }
+}
+
 const AUTOMATION_LIGHT_RETRY_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const AUTOMATION_LIGHT_RETRY_WINDOW: Duration = Duration::from_secs(6 * 60 * 60);
 
-async fn retry_automation_lights<F, Fut>(started: tokio::time::Instant, mut attempt: F)
-where
+async fn retry_automation_lights<F, Fut>(
+    started: tokio::time::Instant,
+    mut cancelled: watch::Receiver<()>,
+    mut attempt: F,
+) where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
     let deadline = started + AUTOMATION_LIGHT_RETRY_WINDOW;
     let mut next = started + AUTOMATION_LIGHT_RETRY_INTERVAL;
     while next <= deadline {
-        tokio::time::sleep_until(next).await;
+        tokio::select! {
+            biased;
+            _ = cancelled.changed() => break,
+            _ = tokio::time::sleep_until(next) => {},
+        }
         // Do not replay expired automations after a long sleep or a slow attempt.
         if tokio::time::Instant::now() > deadline {
             break;
         }
-        if attempt().await {
+        let succeeded = tokio::select! {
+            biased;
+            _ = cancelled.changed() => break,
+            result = attempt() => result,
+        };
+        if succeeded {
             break;
         }
         next += AUTOMATION_LIGHT_RETRY_INTERVAL;
@@ -881,6 +1006,126 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disconnect_cancels_manual_controls_waiting_to_clean_up_a_retry_scan() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        let controller = state.controller.lock().await;
+        let queued_state = state.clone();
+        let queued = tokio::spawn(async move {
+            queued_state
+                .execute(ControlCommand::Power {
+                    on: true,
+                    device: None,
+                })
+                .await
+        });
+        tokio::task::yield_now().await;
+        let disconnect_state = state.clone();
+        let disconnect = tokio::spawn(async move { disconnect_state.disconnect().await });
+        tokio::task::yield_now().await;
+        drop(controller);
+        assert!(queued.await.unwrap().unwrap_err().contains("cancelled"));
+        disconnect.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn manual_light_control_cancels_all_pending_retries_even_with_bluetooth_off() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        state.controller.lock().await.test_power_state = btleplug::api::CentralState::PoweredOff;
+        let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut jobs = Vec::new();
+        for _ in 0..2 {
+            let counter = count.clone();
+            let cancelled = state.manual_light_signal.subscribe();
+            jobs.push(tokio::spawn(super::retry_automation_lights(
+                tokio::time::Instant::now(),
+                cancelled,
+                move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    std::future::ready(false)
+                },
+            )));
+        }
+        state
+            .execute(ControlCommand::Power {
+                on: true,
+                device: None,
+            })
+            .await
+            .unwrap();
+        for job in jobs {
+            job.await.unwrap();
+        }
+        tokio::time::advance(super::AUTOMATION_LIGHT_RETRY_WINDOW).await;
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        // A later automation gets a fresh subscription and can retry normally.
+        super::retry_automation_lights(
+            tokio::time::Instant::now(),
+            state.manual_light_signal.subscribe(),
+            || {
+                count.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(true)
+            },
+        )
+        .await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn manual_control_cancels_an_in_flight_retry_and_releases_its_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        state.controller.lock().await.test_power_state = btleplug::api::CentralState::PoweredOff;
+        let lock = Arc::new(Mutex::new(()));
+        let operation_lock = lock.clone();
+        let (started, ready) = oneshot::channel();
+        let mut started = Some(started);
+        let cancelled = state.manual_light_signal.subscribe();
+        let job = tokio::spawn(super::retry_automation_lights(
+            tokio::time::Instant::now(),
+            cancelled,
+            move || {
+                let lock = operation_lock.clone();
+                let started = started.take().unwrap();
+                async move {
+                    let _guard = lock.lock().await;
+                    started.send(()).unwrap();
+                    std::future::pending::<bool>().await
+                }
+            },
+        ));
+        ready.await.unwrap();
+        assert!(lock.try_lock().is_err());
+        state
+            .execute(ControlCommand::Preset {
+                name: "daytime".into(),
+                device: None,
+            })
+            .await
+            .unwrap();
+        job.await.unwrap();
+        assert!(lock.try_lock().is_ok());
+    }
+
+    #[test]
+    fn white_breathing_frames_use_dedicated_white_without_resetting_brightness() {
+        for (position, kelvin) in [(0, 2000), (765, 9000), (1530, 2000)] {
+            let command = super::breathing_command(LightMode::White, position, None);
+            let ControlCommand::White {
+                kelvin: actual,
+                brightness,
+                ..
+            } = command
+            else {
+                panic!("expected dedicated white frame");
+            };
+            assert_eq!(actual, Some(kelvin));
+            assert_eq!(brightness, None);
+        }
+    }
+
+    #[tokio::test]
     async fn bluetooth_off_commands_do_not_change_settings_or_start_effects() {
         let directory = tempfile::tempdir().unwrap();
         let state = SharedState::new(directory.path().join("missing-settings.json"));
@@ -895,6 +1140,10 @@ mod tests {
                 device: None,
             },
             ControlCommand::Party { device: None },
+            ControlCommand::BreatheWhite {
+                sweep_seconds: 30,
+                device: None,
+            },
             ControlCommand::Breathe {
                 interval_ms: Some(500),
                 cycle_seconds: None,
@@ -982,7 +1231,8 @@ mod tests {
     async fn light_retries_run_every_fifteen_minutes_for_six_hours() {
         let started = tokio::time::Instant::now();
         let mut attempts = 0;
-        super::retry_automation_lights(started, || {
+        let (_cancel, cancelled) = watch::channel(());
+        super::retry_automation_lights(started, cancelled, || {
             attempts += 1;
             assert_eq!(
                 tokio::time::Instant::now() - started,
@@ -1002,7 +1252,8 @@ mod tests {
     async fn slow_light_attempts_do_not_shift_the_retry_schedule() {
         let started = tokio::time::Instant::now();
         let mut attempts = 0;
-        super::retry_automation_lights(started, || {
+        let (_cancel, cancelled) = watch::channel(());
+        super::retry_automation_lights(started, cancelled, || {
             attempts += 1;
             assert_eq!(
                 tokio::time::Instant::now() - started,
@@ -1021,7 +1272,8 @@ mod tests {
     async fn light_retries_stop_as_soon_as_a_target_succeeds() {
         let started = tokio::time::Instant::now();
         let mut attempts = 0;
-        super::retry_automation_lights(started, || {
+        let (_cancel, cancelled) = watch::channel(());
+        super::retry_automation_lights(started, cancelled, || {
             attempts += 1;
             std::future::ready(attempts == 2)
         })
@@ -1040,7 +1292,8 @@ mod tests {
             super::AUTOMATION_LIGHT_RETRY_WINDOW + std::time::Duration::from_secs(1),
         )
         .await;
-        super::retry_automation_lights(started, || async {
+        let (_cancel, cancelled) = watch::channel(());
+        super::retry_automation_lights(started, cancelled, || async {
             panic!("expired automation must not run");
         })
         .await;

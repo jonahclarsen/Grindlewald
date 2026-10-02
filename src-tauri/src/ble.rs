@@ -32,6 +32,7 @@ pub struct BleController {
     #[cfg(test)]
     pub(crate) test_power_state: CentralState,
     adapter: Option<Adapter>,
+    scan_active: bool,
     connections: HashMap<String, Peripheral>,
     light_states: HashMap<String, LightState>,
     control_characteristics: HashMap<String, Characteristic>,
@@ -49,6 +50,7 @@ impl BleController {
             #[cfg(test)]
             test_power_state: CentralState::PoweredOn,
             adapter: None,
+            scan_active: false,
             connections: HashMap::new(),
             light_states: HashMap::new(),
             control_characteristics: HashMap::new(),
@@ -60,6 +62,7 @@ impl BleController {
             return Ok(Vec::new());
         }
         let adapter = self.adapter().await?;
+        self.scan_active = true;
         adapter
             .start_scan(ScanFilter::default())
             .await
@@ -70,6 +73,7 @@ impl BleController {
             .await
             .map_err(|error| error.to_string())?;
         let _ = adapter.stop_scan().await;
+        self.scan_active = false;
 
         let mut discovered = Vec::new();
         for peripheral in peripherals {
@@ -258,6 +262,7 @@ impl BleController {
         // btleplug's macOS backend discards its native peripheral on disconnect;
         // a cached adapter.peripherals() entry alone is not safe to reconnect.
         let events = adapter.events().await.map_err(|error| error.to_string())?;
+        self.scan_active = true;
         adapter
             .start_scan(ScanFilter::default())
             .await
@@ -287,6 +292,7 @@ impl BleController {
         // Stop on success, timeout, or error. Explicit cancellation stops scanning
         // through disconnect_all, including while scan_targets is awaiting an event.
         let stop_result = adapter.stop_scan().await.map_err(|error| error.to_string());
+        self.scan_active = false;
         let targets = targets?;
         stop_result?;
         // Track attempts before awaiting connect so cancellation can release every link.
@@ -324,6 +330,20 @@ impl BleController {
         }
     }
 
+    // A dropped automation future may have been scanning. Release that scan
+    // before a manual command begins, without disconnecting existing lights.
+    pub async fn cancel_pending_scan(&mut self) {
+        if !self.scan_active {
+            return;
+        }
+        if !self.bluetooth_powered_off().await.unwrap_or(true) {
+            if let Some(adapter) = &self.adapter {
+                let _ = adapter.stop_scan().await;
+            }
+        }
+        self.scan_active = false;
+    }
+
     pub async fn connected_count(&self) -> Result<usize, String> {
         if let Some(adapter) = &self.adapter {
             if adapter
@@ -352,6 +372,7 @@ impl BleController {
 
     pub async fn disconnect_all(&mut self) -> Result<(), String> {
         if self.adapter.is_some() && self.bluetooth_powered_off().await? {
+            self.scan_active = false;
             let identifiers: Vec<_> = self.connections.keys().cloned().collect();
             for identifier in identifiers {
                 self.forget_connection(&identifier);
@@ -360,6 +381,7 @@ impl BleController {
         }
         if let Some(adapter) = &self.adapter {
             let _ = adapter.stop_scan().await;
+            self.scan_active = false;
         }
         let results = join_all(self.connections.iter().map(
             |(identifier, peripheral)| async move {
@@ -573,6 +595,7 @@ fn frames_for(
         }
         ControlCommand::Party { .. }
         | ControlCommand::Breathe { .. }
+        | ControlCommand::BreatheWhite { .. }
         | ControlCommand::SeekBreathing { .. }
         | ControlCommand::TraceBreathing { .. }
         | ControlCommand::StopParty
@@ -603,6 +626,9 @@ mod tests {
             ..Settings::default()
         };
         assert!(controller.discover().await.unwrap().is_empty());
+        controller.scan_active = true;
+        controller.cancel_pending_scan().await;
+        assert!(!controller.scan_active);
         assert_eq!(
             controller
                 .apply(

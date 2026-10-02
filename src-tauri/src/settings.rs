@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     breathing::{
         COLOR_COUNT, MAX_COLOR_STEP, color_step_from_degrees, default_color_step,
-        default_interval_ms, frame_interval, rounded_interval_ms, validate_color_step,
+        default_interval_ms, default_white_sweep_seconds, frame_interval, rounded_interval_ms,
+        validate_color_step, validate_white_sweep_seconds,
     },
     protocol::DeviceProfile,
 };
@@ -128,6 +129,8 @@ pub struct Settings {
     pub breathing_interval_ms: u32,
     #[serde(default = "default_color_step")]
     pub breathing_color_step: u16,
+    #[serde(default = "default_white_sweep_seconds")]
+    pub white_breathing_sweep_seconds: u32,
     #[serde(default)]
     pub breathing_defaults_version: u8,
     #[serde(default)]
@@ -168,6 +171,7 @@ impl Default for Settings {
             connection_hold_seconds: default_connection_hold_seconds(),
             breathing_interval_ms: default_interval_ms(),
             breathing_color_step: default_color_step(),
+            white_breathing_sweep_seconds: default_white_sweep_seconds(),
             breathing_defaults_version: 3,
             presets: vec![
                 Preset {
@@ -239,6 +243,7 @@ impl Settings {
         }
         frame_interval(self.breathing_interval_ms)?;
         validate_color_step(self.breathing_color_step)?;
+        validate_white_sweep_seconds(self.white_breathing_sweep_seconds)?;
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();
@@ -393,6 +398,23 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn white_breathing_pace_defaults_for_old_settings_and_round_trips() {
+        let old: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(old.white_breathing_sweep_seconds, 30);
+        let mut settings = Settings {
+            white_breathing_sweep_seconds: 45,
+            ..Settings::default()
+        };
+        let restored: Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.white_breathing_sweep_seconds, 45);
+        for invalid in [0, 6, 125] {
+            settings.white_breathing_sweep_seconds = invalid;
+            assert!(settings.validate().is_err());
+        }
+    }
 
     #[test]
     fn light_targets_preserve_legacy_behavior_and_support_explicit_none() {

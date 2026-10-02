@@ -23,6 +23,8 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Bluetooth discovery plus add, edit, enable, and remove controls for individual lights; existing matches remain visible and are labeled as already added
 - Bluetooth identifiers are displayed and stored in uppercase but matched case-insensitively for discovery and live connections
 - Daily local-time automations targeting one, several, or all enabled lights
+- Manual light controls cancel all pending automation light retries
+- White breathing sweeps between warm and cool white at a saved pace of 5–120 seconds each way, keeping brightness steady
 - With macOS Bluetooth off, light controls and discovery are no-ops; automations still run independent actions and do not start light retries
 - Shell actions run in parallel with light changes, including when lights are unavailable
 - Failed automation light actions retry every 15 minutes for up to six hours when no target succeeds; retries stop on success and never repeat shell or floodlight actions
@@ -87,6 +89,9 @@ grindlewaldctl stop-party
 grindlewaldctl breathe --interval-ms 350 --color-step 1
 grindlewaldctl breathe --interval-ms 250 --color-step 10 --light Bedroom
 grindlewaldctl stop-effect
+
+# Breathe between warm and cool white, taking 30 seconds each way
+grindlewaldctl breathe-white --sweep-seconds 30
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
 grindlewaldctl experiment '04 08' --light Bedroom
@@ -159,7 +164,9 @@ Older full-cycle settings migrate to their average interval (`cycleSeconds × 10
 
 The normal Color hue slider and swatch show the last successfully sent breathing color. Dragging or using its arrow keys seeks within the running effect, applies the latest requested hue after any in-flight write, and continues the fixed-step sequence from there. The selected static color is retained for when breathing stops.
 
-To measure breathing without changing its timing, run `grindlewaldctl trace-breathing --seconds 60` while it is active. The command buffers timing samples in memory and returns the path to a JSON log in the app's Application Support diagnostics directory. It records per-light Bluetooth write duration, connection checks, controller lock waits, timer lateness, total update duration, and backend hue-publication/event-emission timestamps. Lights use numeric indices; device names and identifiers are not logged. Run `python3 scripts/summarize-breathing-trace.py <log-path>` for count, mean, median, p95, p99, minimum, maximum, and standard deviation, plus update-spacing statistics. These measure the app and Bluetooth API, not physical lamp response or browser paint timing. Captures last 5–300 seconds and are limited to 100,000 samples. Control-characteristic metadata is cached for each connection and invalidated when that connection is lost or released. Add `--uncached-characteristic` to compare the previous lookup path during a capture; the cached path resumes when the capture ends or is cancelled. Connection checks, Bluetooth write completion, packet contents, and breathing scheduling are unchanged.
+White breathing is available in the White card and from `grindlewaldctl breathe-white --sweep-seconds 30`. Dragging the warmth picker moves the running sweep; Stop restores the saved static white selection.
+
+To measure color breathing without changing its timing, run `grindlewaldctl trace-breathing --seconds 60` while it is active. The command buffers timing samples in memory and returns the path to a JSON log in the app's Application Support diagnostics directory. It records per-light Bluetooth write duration, connection checks, controller lock waits, timer lateness, total update duration, and backend hue-publication/event-emission timestamps. Lights use numeric indices; device names and identifiers are not logged. Run `python3 scripts/summarize-breathing-trace.py <log-path>` for count, mean, median, p95, p99, minimum, maximum, and standard deviation, plus update-spacing statistics. These measure the app and Bluetooth API, not physical lamp response or browser paint timing. Captures last 5–300 seconds and are limited to 100,000 samples. Control-characteristic metadata is cached for each connection and invalidated when that connection is lost or released. Add `--uncached-characteristic` to compare the previous lookup path during a capture; the cached path resumes when the capture ends or is cancelled. Connection checks, Bluetooth write completion, packet contents, and breathing scheduling are unchanged.
 
 The connection row above every page shows the current Bluetooth link status. Click the **Disconnect** button beside the connection status (also available while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The status returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
 

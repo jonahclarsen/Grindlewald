@@ -1,3 +1,4 @@
+import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
@@ -19,6 +20,7 @@ const demoSettings = {
   connectionHoldSeconds: 6,
   breathingIntervalMs: 350,
   breathingColorStep: 1,
+  whiteBreathingSweepSeconds: 30,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -52,6 +54,7 @@ const breathingSeekQueue = createControlQueue(
 );
 let latestBreathingFrame = null;
 let breathingSeekRequestId = 0;
+let whitePointerDown = false;
 let huePointerDown = false;
 let activeEffect = null;
 let connectionStatus = null;
@@ -113,31 +116,6 @@ function colorAtHue(hue) {
   return rgbToHex(colors[Math.floor(sector) % 6]);
 }
 
-function mixRgb(start, end, amount) {
-  return start.map((channel, index) => channel + (end[index] - channel) * amount);
-}
-
-const whiteAnchors = [
-  [2000, [255, 141, 11]],
-  [2700, [255, 169, 87]],
-  [5500, [255, 238, 222]],
-  [7500, [238, 239, 255]],
-  [9000, [217, 225, 255]],
-];
-
-function kelvinAtPosition(position) {
-  return Math.round(2000 + Math.max(0, Math.min(1, position)) * 7000);
-}
-
-function whiteAtPosition(position) {
-  const kelvin = kelvinAtPosition(position);
-  const upperIndex = whiteAnchors.findIndex(([anchorKelvin]) => anchorKelvin >= kelvin);
-  if (upperIndex <= 0) return rgbToHex(whiteAnchors[0][1]);
-  const [upperKelvin, upperRgb] = whiteAnchors[upperIndex];
-  const [lowerKelvin, lowerRgb] = whiteAnchors[upperIndex - 1];
-  return rgbToHex(mixRgb(lowerRgb, upperRgb, (kelvin - lowerKelvin) / (upperKelvin - lowerKelvin)));
-}
-
 function whitePositionFromHex(value) {
   const target = hexToRgb(value);
   let bestPosition = 0;
@@ -161,7 +139,7 @@ function paintHue(hue) {
 }
 
 function applyBreathingPlayback(frame) {
-  if (!frame || activeEffect !== "breathe") return;
+  if (!frame || !["breathe", "white-breathe"].includes(activeEffect)) return;
   if (latestBreathingFrame && (frame.generation < latestBreathingFrame.generation ||
       (frame.generation === latestBreathingFrame.generation && frame.frameId < latestBreathingFrame.frameId))) return;
   if (latestBreathingFrame && frame.generation > latestBreathingFrame.generation) {
@@ -169,8 +147,9 @@ function applyBreathingPlayback(frame) {
     breathingSeekQueue.clear();
   }
   latestBreathingFrame = frame;
-  if (!huePointerDown && frame.requestId >= breathingSeekRequestId) {
-    paintHue(frame.position / 1530 * 360);
+  if (frame.requestId >= breathingSeekRequestId) {
+    if (frame.mode === "white" && !whitePointerDown) paintWhite(whitePlaybackPosition(frame.position));
+    else if (frame.mode !== "white" && !huePointerDown) paintHue(frame.position / 1530 * 360);
   }
 }
 
@@ -191,12 +170,25 @@ function updateHue(hue, shouldSend = true) {
   queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
 }
 
+function paintWhite(position) {
+  const normalizedPosition = Math.max(0, Math.min(1, position));
+  $("#white-knob").style.setProperty("--knob-position", `${normalizedPosition * 100}%`);
+  $("#white-swatch").style.background = whiteAtPosition(normalizedPosition);
+  $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
+}
+
 function updateWhite(position, shouldSend = true) {
   const normalizedPosition = Math.max(0, Math.min(1, position));
+  paintWhite(normalizedPosition);
+  if (shouldSend && activeEffect === "white-breathe") {
+    if (disconnecting) return;
+    return breathingSeekQueue.enqueue({
+      command: "seek_breathing",
+      position: whiteSeekPhase(normalizedPosition, latestBreathingFrame?.position),
+      request_id: ++breathingSeekRequestId,
+    });
+  }
   settings.white = whiteAtPosition(normalizedPosition);
-  $("#white-knob").style.setProperty("--knob-position", `${normalizedPosition * 100}%`);
-  $("#white-swatch").style.background = settings.white;
-  $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
   if (!shouldSend) return;
   settings.mode = "white";
   settings.whiteKelvin = kelvinAtPosition(normalizedPosition);
@@ -217,7 +209,7 @@ function makeDraggable(track, update) {
   });
   track.addEventListener("pointerup", (event) => {
     if (track.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
-    if (!(track.id === "hue-track" && activeEffect === "breathe")) save();
+    if (!((track.id === "hue-track" && activeEffect === "breathe") || (track.id === "white-track" && activeEffect === "white-breathe"))) save();
   });
 }
 
@@ -318,7 +310,8 @@ async function refreshConnection() {
       connectionStatus = status;
       if (!status.effectActive && controlsInFlight === 0) setEffectActive(null);
       else if (status.breathing && controlsInFlight === 0) {
-        if (activeEffect !== "breathe") setEffectActive("breathe");
+        const effect = status.breathing.mode === "white" ? "white-breathe" : "breathe";
+        if (activeEffect !== effect) setEffectActive(effect);
         applyBreathingPlayback(status.breathing);
       }
     }
@@ -373,7 +366,7 @@ async function callBackend(command, args = {}) {
       return "Disconnected from lights";
     }
     if (command === "execute_control") {
-      if (args.command.command !== "seek_breathing") demoEffectActive = ["party", "breathe"].includes(args.command.command);
+      if (args.command.command !== "seek_breathing") demoEffectActive = ["party", "breathe", "breathe_white"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
     if (command === "home_network_status") return { fingerprint: "router-sha256:" + "0".repeat(64) };
@@ -433,6 +426,13 @@ function setEffectActive(effect) {
   $("#hue-track").setAttribute("aria-label", effect === "breathe" ? "Breathing hue; drag to move within the cycle" : "Color hue");
   $("#color-picker-hint").textContent = effect === "breathe" ? "Breathing · drag to move" : "Drag to choose a hue";
   if (effect !== "breathe" && settings) paintHue(hueFromHex(settings.color));
+  $("#white-track").setAttribute("aria-label", effect === "white-breathe" ? "Breathing warmth; drag to move within the sweep" : "White warmth");
+  $("#white-picker-hint").textContent = effect === "white-breathe" ? "Breathing · drag to move" : "Dedicated white LEDs";
+  if (effect !== "white-breathe" && settings) paintWhite(whitePositionFromHex(settings.white));
+  const whiteButton = $("#white-breathing-button");
+  whiteButton.classList.toggle("active", effect === "white-breathe");
+  whiteButton.setAttribute("aria-pressed", String(effect === "white-breathe"));
+  whiteButton.querySelector("span").textContent = effect === "white-breathe" ? "Stop white breathing" : "Breathe white";
   [["#party-button", "party", "Party"], ["#breathing-button", "breathe", "Breathe"]].forEach(([selector, name, label]) => {
     const button = $(selector);
     const active = effect === name;
@@ -683,11 +683,15 @@ function renderBreathingControls() {
   $("#breathing-interval-output").value = label;
   $("#breathing-color-step").value = settings.breathingColorStep;
   $("#breathing-color-step-output").value = String(settings.breathingColorStep);
+  $("#white-breathing-sweep").value = settings.whiteBreathingSweepSeconds;
+  const sweepLabel = `${settings.whiteBreathingSweepSeconds} s each way`;
+  $("#white-breathing-sweep-output").value = sweepLabel;
+  $("#white-breathing-sweep").setAttribute("aria-valuetext", sweepLabel);
 }
 
 function renderAll() {
   renderLightSelection();
-  if (activeEffect === "breathe" && latestBreathingFrame) paintHue(latestBreathingFrame.position / 1530 * 360);
+  if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   renderBreathingControls();
   renderQuickPresets();
@@ -1002,6 +1006,13 @@ for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
   });
 }
 makeDraggable($("#hue-track"), (position) => updateHue(position * 360));
+$("#white-track").addEventListener("pointerdown", () => { whitePointerDown = true; });
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  $("#white-track").addEventListener(event, () => {
+    whitePointerDown = false;
+    if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
+  });
+}
 makeDraggable($("#white-track"), updateWhite);
 $("#hue-track").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -1012,8 +1023,8 @@ $("#hue-track").addEventListener("keydown", (event) => {
 $("#white-track").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
-  updateWhite(whitePositionFromHex(settings.white) + (event.key === "ArrowRight" ? 0.02 : -0.02));
-  save();
+  updateWhite(Number(event.currentTarget.getAttribute("aria-valuenow")) / 100 + (event.key === "ArrowRight" ? 0.02 : -0.02));
+  if (activeEffect !== "white-breathe") save();
 });
 $("#brightness").addEventListener("input", (event) => {
   settings.brightness = Number(event.target.value) / 100;
@@ -1037,7 +1048,9 @@ async function toggleEffect(effect) {
       command: starting
         ? effect === "party"
           ? { command: "party", device: null }
-          : {
+          : effect === "white-breathe"
+            ? whiteBreathingCommand(settings.whiteBreathingSweepSeconds)
+            : {
               command: "breathe",
               interval_ms: settings.breathingIntervalMs,
               color_step: settings.breathingColorStep,
@@ -1046,7 +1059,7 @@ async function toggleEffect(effect) {
         : { command: "stop_effect" },
     });
     if (generation !== controlGeneration) return;
-    setEffectActive(starting ? effect : null);
+    setEffectActive(starting && !message.includes("Bluetooth is off") ? effect : null);
     setStatus(message);
   } catch (error) {
     if (generation !== controlGeneration) return;
@@ -1057,6 +1070,19 @@ async function toggleEffect(effect) {
 
 $("#party-button").addEventListener("click", () => toggleEffect("party"));
 $("#breathing-button").addEventListener("click", () => toggleEffect("breathe"));
+$("#white-breathing-button").addEventListener("click", () => toggleEffect("white-breathe"));
+$("#white-breathing-sweep").addEventListener("input", (event) => {
+  settings.whiteBreathingSweepSeconds = Number(event.target.value);
+  renderBreathingControls();
+});
+$("#white-breathing-sweep").addEventListener("change", async () => {
+  if (!await save()) return;
+  if (activeEffect === "white-breathe") {
+    const generation = controlGeneration;
+    await toggleEffect("white-breathe");
+    if (generation === controlGeneration) await toggleEffect("white-breathe");
+  }
+});
 $("#breathing-interval").addEventListener("input", (event) => {
   settings.breathingIntervalMs = Number(event.target.value);
   renderBreathingControls();

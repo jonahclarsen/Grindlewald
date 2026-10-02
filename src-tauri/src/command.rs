@@ -46,6 +46,10 @@ pub enum ControlCommand {
         hue_step_degrees: Option<f32>,
         device: Option<String>,
     },
+    BreatheWhite {
+        sweep_seconds: u32,
+        device: Option<String>,
+    },
     TraceBreathing {
         seconds: u32,
         #[serde(default = "crate::timing::default_cache_characteristic")]
@@ -83,6 +87,7 @@ impl ControlCommand {
             | Self::Preset { device, .. }
             | Self::Party { device }
             | Self::Breathe { device, .. }
+            | Self::BreatheWhite { device, .. }
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
             | Self::Experiment { device, .. } => device.as_deref(),

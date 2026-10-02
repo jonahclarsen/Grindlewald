@@ -127,11 +127,102 @@ pub fn color_at_position(position: u16) -> String {
     format!("#{red:02x}{green:02x}{blue:02x}")
 }
 
+pub fn default_white_sweep_seconds() -> u32 {
+    30
+}
+
+pub fn validate_white_sweep_seconds(seconds: u32) -> Result<(), String> {
+    if !(5..=120).contains(&seconds) || seconds % 5 != 0 {
+        return Err("white sweep must be 5–120 seconds in increments of 5".into());
+    }
+    Ok(())
+}
+
+// White uses the same phase range as color playback, reflected at each endpoint.
+pub fn white_phase(origin: u16, elapsed: Duration, sweep_seconds: u32) -> u16 {
+    ((f64::from(origin)
+        + elapsed.as_secs_f64() * f64::from(COLOR_COUNT / 2) / f64::from(sweep_seconds))
+        as u64
+        % u64::from(COLOR_COUNT)) as u16
+}
+
+pub fn white_kelvin_at_phase(phase: u16) -> u16 {
+    let phase = phase % COLOR_COUNT;
+    let position = phase.min(COLOR_COUNT - phase);
+    (2000.0 + f64::from(position) / f64::from(COLOR_COUNT / 2) * 7000.0).round() as u16
+}
+
+pub fn white_at_kelvin(kelvin: u16) -> String {
+    let anchors = [
+        (2000, [255.0, 141.0, 11.0]),
+        (2700, [255.0, 169.0, 87.0]),
+        (5500, [255.0, 238.0, 222.0]),
+        (7500, [238.0, 239.0, 255.0]),
+        (9000, [217.0, 225.0, 255.0]),
+    ];
+    let kelvin = kelvin.clamp(2000, 9000);
+    let pair = anchors.windows(2).find(|pair| kelvin <= pair[1].0).unwrap();
+    let amount = f64::from(kelvin - pair[0].0) / f64::from(pair[1].0 - pair[0].0);
+    let rgb: [u8; 3] = std::array::from_fn(|index| {
+        (pair[0].1[index] + (pair[1].1[index] - pair[0].1[index]) * amount).round() as u8
+    });
+    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+}
+
+pub fn white_kelvin_from_hex(value: &str) -> Result<u16, String> {
+    let target = crate::protocol::parse_hex_color(value)?;
+    Ok((2000..=9000)
+        .step_by(70)
+        .min_by_key(|kelvin| {
+            let candidate = crate::protocol::parse_hex_color(&white_at_kelvin(*kelvin)).unwrap();
+            candidate
+                .iter()
+                .zip(target)
+                .map(|(a, b)| i32::from(*a).abs_diff(i32::from(b)).pow(2))
+                .sum::<u32>()
+        })
+        .unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::parse_hex_color;
     use std::collections::HashSet;
+
+    #[test]
+    fn white_sweeps_hit_both_endpoints_and_return_at_the_selected_pace() {
+        for seconds in (5..=120).step_by(5) {
+            assert!(validate_white_sweep_seconds(seconds).is_ok());
+            for (elapsed, kelvin) in [(0, 2000), (seconds, 9000), (2 * seconds, 2000)] {
+                assert_eq!(
+                    white_kelvin_at_phase(white_phase(
+                        0,
+                        Duration::from_secs(u64::from(elapsed)),
+                        seconds
+                    )),
+                    kelvin
+                );
+            }
+            assert_eq!(
+                white_kelvin_at_phase(white_phase(
+                    0,
+                    Duration::from_secs_f64(f64::from(seconds) / 2.0),
+                    seconds
+                )),
+                5495
+            );
+        }
+        for seconds in [0, 4, 6, 121, u32::MAX] {
+            assert!(validate_white_sweep_seconds(seconds).is_err());
+        }
+        assert_eq!(white_at_kelvin(2000), "#ff8d0b");
+        assert_eq!(white_at_kelvin(5500), "#ffeede");
+        assert_eq!(white_at_kelvin(9000), "#d9e1ff");
+        for (hex, kelvin) in [("#ff8d0b", 2000), ("#ffeede", 5500), ("#d9e1ff", 9000)] {
+            assert_eq!(white_kelvin_from_hex(hex).unwrap(), kelvin);
+        }
+    }
 
     #[test]
     fn every_update_advances_the_selected_step_even_across_wrap() {

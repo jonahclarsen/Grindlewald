@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use grindlewald_lib::{
-    breathing::{color_step_from_degrees, default_color_step, frame_interval, resolve_interval_ms},
+    breathing::{
+        color_step_from_degrees, default_color_step, frame_interval, resolve_interval_ms,
+        validate_white_sweep_seconds,
+    },
     command::{CommandResponse, ControlCommand},
     ipc::socket_path,
 };
@@ -14,6 +17,12 @@ fn parse_interval(value: &str) -> Result<u32, String> {
     let ms = value.parse::<u32>().map_err(|error| error.to_string())?;
     frame_interval(ms)?;
     Ok(ms)
+}
+
+fn parse_white_sweep(value: &str) -> Result<u32, String> {
+    let seconds = value.parse::<u32>().map_err(|error| error.to_string())?;
+    validate_white_sweep_seconds(seconds)?;
+    Ok(seconds)
 }
 
 #[derive(Parser)]
@@ -96,6 +105,14 @@ enum CliCommand {
         #[arg(short, long)]
         light: Option<String>,
     },
+    /// Sweep dedicated white LEDs between warm and cool, keeping brightness steady.
+    BreatheWhite {
+        /// Seconds for each one-way sweep (5-120, in steps of 5).
+        #[arg(long, default_value_t = 30, value_parser = parse_white_sweep)]
+        sweep_seconds: u32,
+        #[arg(short, long)]
+        light: Option<String>,
+    },
     /// Capture timing from an already-running breathing effect without changing its pace.
     TraceBreathing {
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(5..=300))]
@@ -174,6 +191,13 @@ async fn main() -> anyhow::Result<()> {
                 device: light,
             }
         }
+        CliCommand::BreatheWhite {
+            sweep_seconds,
+            light,
+        } => ControlCommand::BreatheWhite {
+            sweep_seconds,
+            device: light,
+        },
         CliCommand::TraceBreathing {
             seconds,
             uncached_characteristic,
@@ -216,6 +240,23 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn white_breathing_cli_accepts_only_supported_sweep_durations() {
+        let cli = Cli::try_parse_from(["ctl", "breathe-white"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::BreatheWhite {
+                sweep_seconds: 30,
+                ..
+            }
+        ));
+        for invalid in ["0", "6", "125", "30.5"] {
+            assert!(
+                Cli::try_parse_from(["ctl", "breathe-white", "--sweep-seconds", invalid]).is_err()
+            );
+        }
+    }
 
     #[test]
     fn interval_cli_accepts_only_supported_millisecond_increments() {
