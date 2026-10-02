@@ -1,4 +1,4 @@
-import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand } from "./white-breathing.js";
+import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
@@ -366,7 +366,7 @@ async function callBackend(command, args = {}) {
       return "Disconnected from lights";
     }
     if (command === "execute_control") {
-      if (args.command.command !== "seek_breathing") demoEffectActive = ["party", "breathe", "breathe_white"].includes(args.command.command);
+      if (!["seek_breathing", "set_white_breathing_pace"].includes(args.command.command)) demoEffectActive = ["party", "breathe", "breathe_white"].includes(args.command.command);
       demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
     }
     if (command === "home_network_status") return { fingerprint: "router-sha256:" + "0".repeat(64) };
@@ -1079,8 +1079,14 @@ $("#white-breathing-sweep").addEventListener("change", async () => {
   if (!await save()) return;
   if (activeEffect === "white-breathe") {
     const generation = controlGeneration;
-    await toggleEffect("white-breathe");
-    if (generation === controlGeneration) await toggleEffect("white-breathe");
+    try {
+      const message = await call("execute_control", {
+        command: whiteBreathingPaceCommand(settings.whiteBreathingSweepSeconds),
+      });
+      if (generation === controlGeneration) setStatus(message);
+    } catch (error) {
+      if (generation === controlGeneration) setStatus(String(error), "error");
+    }
   }
 });
 $("#breathing-interval").addEventListener("input", (event) => {

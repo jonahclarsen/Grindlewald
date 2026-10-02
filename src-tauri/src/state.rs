@@ -71,6 +71,7 @@ pub struct SharedState {
     disconnecting: Arc<AtomicBool>,
     breathing_frames: watch::Sender<Option<BreathingPlayback>>,
     breathing_seek: watch::Sender<Option<BreathingSeek>>,
+    white_breathing_pace: watch::Sender<Option<(u64, u32)>>,
     light_selection: watch::Sender<Option<LightSelection>>,
 }
 
@@ -87,6 +88,7 @@ impl SharedState {
             disconnecting: Arc::new(AtomicBool::new(false)),
             breathing_frames: watch::channel(None).0,
             breathing_seek: watch::channel(None).0,
+            white_breathing_pace: watch::channel(None).0,
             light_selection: watch::channel(None).0,
         }
     }
@@ -270,6 +272,16 @@ impl SharedState {
             }));
             return Ok("Breathing".into());
         }
+        if let ControlCommand::SetWhiteBreathingPace { sweep_seconds } = &command {
+            validate_white_sweep_seconds(*sweep_seconds)?;
+            let playback = self
+                .current_breathing()
+                .filter(|frame| frame.mode == LightMode::White)
+                .ok_or("White breathing is not running")?;
+            self.white_breathing_pace
+                .send_replace(Some((playback.generation, *sweep_seconds)));
+            return Ok("White breathing pace updated".into());
+        }
         if let ControlCommand::Party { device } = &command {
             return self.start_party(device.clone()).await;
         }
@@ -448,6 +460,7 @@ impl SharedState {
         let generation = self.party_generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let mut seek = self.breathing_seek.subscribe();
+        let mut white_pace = self.white_breathing_pace.subscribe();
         let mut request_id = 0;
         let result = self
             .controller
@@ -474,6 +487,7 @@ impl SharedState {
         let mut deadline = tokio::time::Instant::now() + interval;
         let mut white_started = tokio::time::Instant::now();
         let mut white_origin = origin;
+        let mut sweep_seconds = sweep_seconds;
         let state = self.clone();
         let mut cancelled = self.disconnect_signal.subscribe();
         tauri::async_runtime::spawn(async move {
@@ -481,6 +495,22 @@ impl SharedState {
                 let moved = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
+                    _ = white_pace.changed(), if mode == LightMode::White => {
+                        if state.party_generation.load(Ordering::SeqCst) != generation {
+                            break;
+                        }
+                        let latest = *white_pace.borrow_and_update();
+                        if let Some((request_generation, seconds)) = latest
+                            && request_generation == generation
+                        {
+                            // Rebase from the last sent phase: retain both warmth
+                            // and direction without sending a restore/start frame.
+                            white_origin = cycle.position;
+                            white_started = tokio::time::Instant::now();
+                            sweep_seconds = seconds;
+                        }
+                        continue;
+                    }
                     _ = seek.changed() => true,
                     _ = tokio::time::sleep_until(deadline) => false,
                 };
@@ -1340,6 +1370,59 @@ mod tests {
             device: None,
         };
         assert!(select_preset(&mut settings, &power).is_none());
+    }
+
+    #[tokio::test]
+    async fn white_pace_updates_preserve_the_running_phase_and_generation() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        state.party_active.store(true, Ordering::SeqCst);
+        state.party_generation.store(7, Ordering::SeqCst);
+        state.publish_breathing_mode(1200, 7, 3, LightMode::White);
+        let before = state.current_breathing().unwrap();
+        let mut pace = state.white_breathing_pace.subscribe();
+        state
+            .execute(ControlCommand::SetWhiteBreathingPace { sweep_seconds: 45 })
+            .await
+            .unwrap();
+        pace.changed().await.unwrap();
+        assert_eq!(*pace.borrow_and_update(), Some((7, 45)));
+        let after = state.current_breathing().unwrap();
+        assert_eq!(after.position, before.position);
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.frame_id, before.frame_id);
+        assert_eq!(after.request_id, before.request_id);
+        assert!(state.party_active.load(Ordering::SeqCst));
+        assert!(!state.settings_path.exists());
+        assert!(
+            state
+                .execute(ControlCommand::SetWhiteBreathingPace { sweep_seconds: 6 })
+                .await
+                .is_err()
+        );
+        assert_eq!(*pace.borrow(), Some((7, 45)));
+    }
+
+    #[tokio::test]
+    async fn white_pace_changes_do_not_start_or_change_other_effects() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("missing-settings.json"));
+        assert!(
+            state
+                .execute(ControlCommand::SetWhiteBreathingPace { sweep_seconds: 45 })
+                .await
+                .is_err()
+        );
+        state.party_active.store(true, Ordering::SeqCst);
+        state.publish_breathing(100, 0, 0);
+        assert!(
+            state
+                .execute(ControlCommand::SetWhiteBreathingPace { sweep_seconds: 45 })
+                .await
+                .is_err()
+        );
+        assert_eq!(state.current_breathing().unwrap().position, 100);
+        assert!(state.white_breathing_pace.borrow().is_none());
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand } from "../src/white-breathing.js";
+import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand } from "../src/white-breathing.js";
 
 test("white playback reflects at warm and cool instead of wrapping abruptly", () => {
   assert.equal(whitePlaybackPosition(0), 0);
@@ -27,4 +27,9 @@ test("white pace controls send a one-way sweep duration without color step setti
     assert.deepEqual(whiteBreathingCommand(seconds), { command: "breathe_white", sweep_seconds: seconds, device: null });
   }
   for (const invalid of [0, 6, 125, NaN, 30.5]) assert.throws(() => whiteBreathingCommand(invalid));
+});
+
+test("live white pace updates have no start, stop, or seek action", () => {
+  assert.deepEqual(whiteBreathingPaceCommand(45), { command: "set_white_breathing_pace", sweep_seconds: 45 });
+  assert.throws(() => whiteBreathingPaceCommand(6));
 });

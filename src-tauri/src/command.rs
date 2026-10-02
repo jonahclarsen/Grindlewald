@@ -50,6 +50,9 @@ pub enum ControlCommand {
         sweep_seconds: u32,
         device: Option<String>,
     },
+    SetWhiteBreathingPace {
+        sweep_seconds: u32,
+    },
     TraceBreathing {
         seconds: u32,
         #[serde(default = "crate::timing::default_cache_characteristic")]
@@ -91,7 +94,8 @@ impl ControlCommand {
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
             | Self::Experiment { device, .. } => device.as_deref(),
-            Self::TraceBreathing { .. }
+            Self::SetWhiteBreathingPace { .. }
+            | Self::TraceBreathing { .. }
             | Self::SeekBreathing { .. }
             | Self::StopParty
             | Self::StopEffect => None,

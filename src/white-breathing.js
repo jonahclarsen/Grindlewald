@@ -32,3 +32,8 @@ export function whiteBreathingCommand(sweepSeconds) {
   }
   return { command: "breathe_white", sweep_seconds: sweepSeconds, device: null };
 }
+
+export function whiteBreathingPaceCommand(sweepSeconds) {
+  const { sweep_seconds } = whiteBreathingCommand(sweepSeconds);
+  return { command: "set_white_breathing_pace", sweep_seconds };
+}

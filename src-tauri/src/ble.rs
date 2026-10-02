@@ -596,6 +596,7 @@ fn frames_for(
         ControlCommand::Party { .. }
         | ControlCommand::Breathe { .. }
         | ControlCommand::BreatheWhite { .. }
+        | ControlCommand::SetWhiteBreathingPace { .. }
         | ControlCommand::SeekBreathing { .. }
         | ControlCommand::TraceBreathing { .. }
         | ControlCommand::StopParty
