@@ -207,6 +207,6 @@ code { color: #d5c9f5; font-family: ui-monospace, SFMono-Regular, Menlo, monospa
 .white-breathing-controls { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 #white-breathing-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
 .white-breathing-controls .pace-control { grid-template-columns: 65px minmax(0, 1fr) 88px; }
-.white-breathing-hint { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
+.white-breathing-controls .pace-control[hidden] { display: none; }
 
 .white-breathing-controls .pace-control output { width: auto; }

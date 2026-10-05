@@ -433,6 +433,7 @@ function setEffectActive(effect) {
   whiteButton.classList.toggle("active", effect === "white-breathe");
   whiteButton.setAttribute("aria-pressed", String(effect === "white-breathe"));
   whiteButton.querySelector("span").textContent = effect === "white-breathe" ? "Stop white breathing" : "Breathe white";
+  $("#white-breathing-pace").hidden = effect !== "white-breathe";
   [["#party-button", "party", "Party"], ["#breathing-button", "breathe", "Breathe"]].forEach(([selector, name, label]) => {
     const button = $(selector);
     const active = effect === name;
