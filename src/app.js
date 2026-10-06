@@ -69,6 +69,7 @@ let demoEffectActive = false;
 let expandedEditorKey = null;
 const automationEditors = createAutomationEditorState();
 let windowFocused = document.hasFocus();
+let approvingPrivilegedJob = false;
 let privilegedService = demoMode
   ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
   : { installed: false, healthy: false, current: false, message: "Not installed" };
@@ -557,7 +558,7 @@ function renderSchedules() {
         : "Approve root command";
     const approvalControls = schedule.runAsAdministrator || schedule.privilegedApprovedCommand ? `
       <div class="approval-row field full">
-        ${schedule.runAsAdministrator && !approved ? `<button class="primary compact" data-approve-privileged="${escapeHtml(schedule.id)}">${approveLabel}</button>` : ""}
+        ${schedule.runAsAdministrator && !approved ? `<button class="primary compact" data-approve-privileged="${escapeHtml(schedule.id)}" ${approvingPrivilegedJob ? "disabled" : ""}>${approveLabel}</button>` : ""}
         ${schedule.privilegedApprovedCommand ? `<button class="text-button" data-revoke-privileged="${escapeHtml(schedule.id)}">Revoke</button>` : ""}
         <span class="approval-state ${approved ? "" : "pending"}">${approved ? "Approved for unattended use" : hasStaleApproval ? "Command changed · approval required" : "Approval required"}</span>
       </div>` : "";
@@ -878,6 +879,7 @@ document.addEventListener("click", async (event) => {
 
   const approvePrivileged = event.target.closest("[data-approve-privileged]");
   if (approvePrivileged) {
+    if (approvingPrivilegedJob) return;
     if (!privilegedService.installed || !privilegedService.healthy) {
       showPage("settings-page");
       setStatus(privilegedService.installed
@@ -885,9 +887,11 @@ document.addEventListener("click", async (event) => {
         : "Install the privileged automation service first", "error");
       return;
     }
-    await save();
-    setStatus("Waiting for administrator approval…", "busy");
+    approvingPrivilegedJob = true;
+    document.querySelectorAll("[data-approve-privileged]").forEach((button) => { button.disabled = true; });
     try {
+      if (!await save()) return;
+      setStatus("Waiting for administrator approval…", "busy");
       setStatus(await call("approve_privileged_job", { id: approvePrivileged.dataset.approvePrivileged }));
       settings = demoMode ? settings : await call("get_settings");
       if (demoMode) {
@@ -897,6 +901,10 @@ document.addEventListener("click", async (event) => {
       }
       renderSchedules();
     } catch (error) { setStatus(String(error), "error"); }
+    finally {
+      approvingPrivilegedJob = false;
+      document.querySelectorAll("[data-approve-privileged]").forEach((button) => { button.disabled = false; });
+    }
   }
 
   const revokePrivileged = event.target.closest("[data-revoke-privileged]");
