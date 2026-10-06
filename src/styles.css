@@ -176,6 +176,7 @@ button { cursor: pointer; }
 .check-pill { padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.045); color: var(--muted); font-size: 10px; }
 .check-pill input { margin: 0 4px 0 0; accent-color: var(--purple); }
 .radio-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.appearance-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .radio-pill { display: flex; align-items: center; justify-content: center; padding: 7px 5px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.045); color: var(--muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
 .radio-pill:has([data-floodlight-network]) { grid-column: 1 / -1; white-space: normal; }
 .radio-pill:has(input:checked) { border-color: rgba(164,129,239,.7); background: rgba(142,114,232,.2); color: var(--ink); }
