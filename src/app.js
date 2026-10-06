@@ -502,6 +502,7 @@ function showPage(pageId) {
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === pageId));
   updateAutomationEditorActivity();
+  sizeShellCommandInputs();
 }
 
 function renderQuickPresets() {
@@ -596,7 +597,21 @@ function renderSchedules() {
       <button class="secondary" data-test-schedule="${escapeHtml(schedule.id)}">Test automation now</button>
     </article>`;
   }).join("") : '<div class="empty">No automations yet. Add one with ＋.</div>';
+  sizeShellCommandInputs();
 }
+
+function sizeShellCommandInput(input) {
+  if (!input.getClientRects().length) return;
+  input.style.height = "auto";
+  const style = getComputedStyle(input);
+  input.style.height = `${input.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)}px`;
+}
+
+function sizeShellCommandInputs() {
+  document.querySelectorAll('textarea[data-schedule-field="shellCommand"]').forEach(sizeShellCommandInput);
+}
+
+window.addEventListener("resize", sizeShellCommandInputs);
 
 function renderPrivilegedService() {
   const title = privilegedService.installed
@@ -899,6 +914,9 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches('textarea[data-schedule-field="shellCommand"]')) {
+    sizeShellCommandInput(event.target);
+  }
   if (!event.target.hasAttribute("data-schedule-name-input")) return;
   const card = event.target.closest("[data-schedule-index]");
   const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
