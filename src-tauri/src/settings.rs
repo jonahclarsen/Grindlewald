@@ -53,6 +53,15 @@ pub enum FloodlightAction {
     OnHomeNetwork,
 }
 
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemAppearance {
+    #[default]
+    Unchanged,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Schedule {
@@ -77,6 +86,8 @@ pub struct Schedule {
     pub floodlights: FloodlightAction,
     #[serde(default)]
     pub floodlight_network: Option<String>,
+    #[serde(default)]
+    pub system_appearance: SystemAppearance,
     #[serde(default)]
     pub shell_command: String,
     #[serde(default)]
@@ -617,6 +628,7 @@ mod tests {
                 preset: "daytime".into(),
                 floodlights: FloodlightAction::Unchanged,
                 floodlight_network: None,
+                system_appearance: SystemAppearance::Unchanged,
                 shell_command: String::new(),
                 run_as_administrator: false,
                 privileged_approved_command: String::new(),
@@ -643,9 +655,30 @@ mod tests {
         .unwrap();
 
         assert_eq!(schedule.floodlights, FloodlightAction::Unchanged);
+        assert_eq!(schedule.system_appearance, SystemAppearance::Unchanged);
         assert_eq!(schedule.floodlight_network, None);
         assert_eq!(schedule.disabled_until, None);
         assert!(schedule.is_enabled_at(0));
+    }
+
+    #[test]
+    fn system_appearance_choices_survive_settings_round_trips() {
+        for (value, expected) in [
+            ("unchanged", SystemAppearance::Unchanged),
+            ("light", SystemAppearance::Light),
+            ("dark", SystemAppearance::Dark),
+        ] {
+            let schedule: Schedule = serde_json::from_value(serde_json::json!({
+                "id": "appearance", "name": "Appearance", "time": "20:00",
+                "systemAppearance": value
+            }))
+            .unwrap();
+            assert_eq!(schedule.system_appearance, expected);
+            let saved = serde_json::to_value(&schedule).unwrap();
+            assert_eq!(saved["systemAppearance"], value);
+            let restored: Schedule = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored, schedule);
+        }
     }
 
     #[test]

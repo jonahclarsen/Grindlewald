@@ -27,6 +27,7 @@ resolve_dev_signing_identity() {
 
 sign_dev_app() {
   /usr/bin/codesign --force --deep --sign "$signing_identity" --timestamp=none \
+    --entitlements "$script_dir/../src-tauri/Entitlements.plist" \
     --identifier com.jonahclarsen.grindlewald "$1" || return
   /usr/bin/codesign --verify --deep --strict "$1" || return
   /bin/mkdir -p "${signing_identity_file:h}"

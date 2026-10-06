@@ -549,6 +549,7 @@ function renderSchedules() {
       return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     const floodlightAction = schedule.floodlights || "unchanged";
+    const systemAppearance = schedule.systemAppearance || "unchanged";
     const approved = Boolean(schedule.privilegedApprovedCommand) && schedule.privilegedApprovedCommand === schedule.shellCommand.trim();
     const hasStaleApproval = Boolean(schedule.privilegedApprovedCommand) && !approved;
     const approveLabel = !privilegedService.installed
@@ -590,6 +591,7 @@ function renderSchedules() {
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row"><label class="check-pill"><input type="checkbox" data-schedule-field="allLights" ${allLights ? "checked" : ""}>All lights</label>${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${!allLights && schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>${!schedule.preset || (!allLights && !schedule.lights.length) ? "This preset will not change the lights." : allLights ? "This preset will change all enabled lights." : "This preset will change the selected lights."}</small></div>
         <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_home_network" data-floodlight-network ${floodlightAction === "on_home_network" ? "checked" : ""}><span>Turn on if on home network</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-network-help>${escapeHtml(homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState))}</small></div>
+        <label class="field full">System appearance<select data-schedule-field="systemAppearance"><option value="unchanged" ${systemAppearance === "unchanged" ? "selected" : ""}>Leave unchanged</option><option value="light" ${systemAppearance === "light" ? "selected" : ""}>Light</option><option value="dark" ${systemAppearance === "dark" ? "selected" : ""}>Dark</option></select><small>Changes macOS appearance. Test once to allow Grindlewald to control System Events.</small></label>
         <label class="field full">Optional shell command<textarea data-schedule-field="shellCommand" placeholder="shortcuts run 'Wind Down'">${escapeHtml(schedule.shellCommand)}</textarea></label>
         <label class="check-pill administrator-check"><input type="checkbox" data-schedule-field="runAsAdministrator" ${schedule.runAsAdministrator ? "checked" : ""}>Run unattended as administrator</label>
         ${approvalControls}
@@ -1162,7 +1164,7 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   const fingerprint = await refreshHomeNetwork();
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, systemAppearance: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   automationEditors.expandedIds.add(settings.schedules.at(-1).id);
   await save(); renderSchedules();
 });

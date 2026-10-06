@@ -35,6 +35,9 @@ for key in NSLocationUsageDescription NSLocationWhenInUseUsageDescription NSLoca
     /usr/bin/plutil -remove "$key" "$app_path/Contents/Info.plist"
   fi
 done
+# Keep the automation permission description current in the existing development bundle.
+apple_events_description="$(/usr/bin/plutil -extract NSAppleEventsUsageDescription raw -o - "$script_dir/../src-tauri/Info.plist")"
+/usr/bin/plutil -replace NSAppleEventsUsageDescription -string "$apple_events_description" "$app_path/Contents/Info.plist"
 sign_dev_app "$app_path"
 
 exec "$executable" "$@"

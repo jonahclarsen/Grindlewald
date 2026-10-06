@@ -1,3 +1,4 @@
+mod appearance;
 pub mod ble;
 pub mod breathing;
 pub mod command;

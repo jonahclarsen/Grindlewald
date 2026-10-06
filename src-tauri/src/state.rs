@@ -771,14 +771,16 @@ impl SharedState {
             }
         };
 
-        let (lights_result, floodlights_result, shell_result) =
-            tokio::join!(lights, floodlights, shell);
+        let appearance = crate::appearance::apply(schedule.system_appearance);
+        let (lights_result, floodlights_result, shell_result, appearance_result) =
+            tokio::join!(lights, floodlights, shell, appearance);
         let mut messages = Vec::new();
         let mut errors = Vec::new();
         for result in [
             lights_result.map(Some),
             floodlights_result,
             shell_result.map(Some),
+            appearance_result,
         ] {
             match result {
                 Ok(Some(message)) => messages.push(message),
@@ -793,7 +795,7 @@ impl SharedState {
         }
     }
 
-    // Try every target even when the first one is unavailable. Shell and floodlight
+    // Try every target even when the first one is unavailable. Shell, appearance, and floodlight
     // actions stay outside this method so background retries cannot repeat them.
     async fn run_schedule_lights(&self, schedule: &Schedule) -> (Result<String, String>, bool) {
         let targets = schedule.light_targets();
