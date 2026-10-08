@@ -6,6 +6,7 @@ pub mod ipc;
 mod network;
 pub mod privileged;
 pub mod protocol;
+mod scheduler;
 pub mod settings;
 pub mod state;
 mod timing;

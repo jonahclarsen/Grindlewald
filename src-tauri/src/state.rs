@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -854,29 +853,31 @@ impl SharedState {
     pub fn start_scheduler(&self) {
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut triggered = HashSet::<String>::new();
+            let mut scheduler = crate::scheduler::Scheduler::default();
             loop {
                 let now = Local::now();
-                let today = now.format("%Y-%m-%d").to_string();
-                let minute = now.format("%H:%M").to_string();
-                triggered.retain(|key| key.starts_with(&today));
-
                 if let Ok(settings) = state.load_settings() {
-                    for schedule in settings.schedules.into_iter().filter(|schedule| {
-                        schedule.is_enabled_at(now.timestamp_millis()) && schedule.time == minute
-                    }) {
-                        let key = format!("{today}:{}", schedule.id);
-                        if triggered.insert(key) {
-                            let state = state.clone();
-                            tauri::async_runtime::spawn(async move {
+                    let due = scheduler.due(now, settings.schedules);
+                    if !due.is_empty() {
+                        let state = state.clone();
+                        tauri::async_runtime::spawn(async move {
+                            // Complete earlier missed actions before applying later ones.
+                            for (occurrence, schedule) in due {
+                                if now.signed_duration_since(occurrence).num_seconds() >= 60 {
+                                    eprintln!(
+                                        "{} Grindlewald automation catching up: scheduled for {}",
+                                        Local::now().to_rfc3339(),
+                                        occurrence.to_rfc3339()
+                                    );
+                                }
                                 if let Err(error) = state.run_schedule(schedule).await {
                                     eprintln!(
                                         "{} Grindlewald schedule failed: {error}",
                                         Local::now().to_rfc3339()
                                     );
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(10)).await;
