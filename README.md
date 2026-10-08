@@ -30,6 +30,7 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Failed automation light actions retry every 15 minutes for up to six hours when no target succeeds; retries stop on success and never repeat shell or floodlight actions
 - Optional trusted shell commands run normally or unattended through one root-owned helper after per-command macOS approval
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too
+- Six interface designs (Haligonian, Lumen, Module, Nocturne, Aura, and Phosphor), each a different layout of the same controls, chosen in Settings from miniature preview tiles
 - Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, and Escape to dismiss
 
 ## Setup

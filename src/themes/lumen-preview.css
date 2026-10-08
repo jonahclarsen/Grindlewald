@@ -1,0 +1,216 @@
+/* Lumen preview tile: toolbar, top segmented control, Control Center grid, split light/dark like macOS "Auto".
+   The shell is a diagonal light/dark gradient; tiles add a fixed lift with plus-lighter and text bars use
+   difference, so one set of shapes reads correctly on both halves. */
+.theme-preview[data-theme-preview="lumen"] {
+  isolation: isolate;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(to bottom right, #e6e6e6 50%, #1c1c1e 50%);
+  box-shadow: none;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Toolbar */
+.theme-preview[data-theme-preview="lumen"] .tp-header {
+  order: 0;
+  height: 15%;
+  gap: 5%;
+  padding: 0 8%;
+  background: none;
+  border: 0;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-mark {
+  flex-shrink: 0;
+  width: 11%;
+  border: 0;
+  border-radius: 28%;
+  background: radial-gradient(circle, #fff 0 8%, #ff8a3d 22% 34%, transparent 46%), linear-gradient(165deg, #4a4a4e, #1d1d1f);
+  box-shadow: 0 .5px 1px rgba(0, 0, 0, .3);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-title {
+  width: 30%;
+  height: 4px;
+  border-radius: 2px;
+  background: #d2d2d2;
+  mix-blend-mode: difference;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-header::after {
+  content: "";
+  display: block;
+  width: 20%;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: radial-gradient(circle at 4px 50%, #34c759 0 1.6px, transparent 2px), rgba(118, 118, 128, .22);
+}
+
+/* Segmented control sits under the toolbar */
+.theme-preview[data-theme-preview="lumen"] .tp-nav {
+  order: 1;
+  height: 9%;
+  margin: 0 8%;
+  padding: 1.5px;
+  gap: 1px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(118, 118, 128, .3);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-tab {
+  position: relative;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-tab.tp-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: #2a2a2a;
+  mix-blend-mode: plus-lighter;
+}
+
+/* Module grid */
+.theme-preview[data-theme-preview="lumen"] .tp-body {
+  order: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  gap: 4px;
+  padding: 7% 8% 8%;
+  background: none;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-card {
+  position: relative;
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="lumen"] :is(.tp-card, .tp-power .tp-button)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: #141414;
+  mix-blend-mode: plus-lighter;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-label {
+  height: 3px;
+  border-radius: 2px;
+  background: #d2d2d2;
+  mix-blend-mode: difference;
+}
+
+/* Floodlights: icon circle, title, compact action group */
+.theme-preview[data-theme-preview="lumen"] .tp-flood { order: 0; gap: 3px; flex-wrap: nowrap; }
+.theme-preview[data-theme-preview="lumen"] .tp-flood::after {
+  content: "";
+  order: -1;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #ffb340, #ff8a00);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-flood .tp-label { flex: 1; max-width: 32%; margin-right: auto; }
+.theme-preview[data-theme-preview="lumen"] .tp-flood .tp-button {
+  flex: 0 0 18%;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(118, 118, 128, .26);
+}
+
+/* Lights off / on become two toggle modules */
+.theme-preview[data-theme-preview="lumen"] .tp-power { display: contents; }
+.theme-preview[data-theme-preview="lumen"] .tp-power .tp-button {
+  position: relative;
+  order: 1;
+  grid-column: span 1;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-power .tp-button::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 0 1.3px, rgba(140, 140, 146, .9) 1.6px 2.4px, transparent 2.7px), rgba(118, 118, 128, .26);
+  box-shadow: 0 9px 0 -2.5px rgba(140, 140, 146, .7), 4px 9px 0 -2.5px rgba(140, 140, 146, .7);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-power .tp-button.tp-accent::after {
+  background: radial-gradient(circle, #fff 0 1.3px, transparent 1.6px 2.3px, rgba(255, 255, 255, .9) 2.6px 3px, transparent 3.3px), #0a84ff;
+}
+
+/* Brightness: a fat capsule slider on a pill module */
+.theme-preview[data-theme-preview="lumen"] .tp-power .tp-level {
+  order: 2;
+  grid-column: 1 / -1;
+  height: 8px;
+  margin: 4px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff9a6b, #ff5a2a 45%, rgba(118, 118, 128, .28) 45%);
+  outline: 0;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-power .tp-level::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  z-index: -1;
+  border-radius: 6px;
+  background: #141414;
+  mix-blend-mode: plus-lighter;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-level .tp-knob {
+  left: 45%;
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .45);
+}
+
+/* Color and White modules side by side */
+.theme-preview[data-theme-preview="lumen"] :is(.tp-color, .tp-white) { order: 3; grid-column: span 1; gap: 3px; row-gap: 4px; }
+.theme-preview[data-theme-preview="lumen"] :is(.tp-color, .tp-white) .tp-label { max-width: 40%; }
+.theme-preview[data-theme-preview="lumen"] .tp-swatch {
+  width: 6px;
+  height: 6px;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(128, 128, 128, .35);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-color .tp-swatch { background: #ff5a2a; box-shadow: 0 0 0 1px #0a84ff; }
+.theme-preview[data-theme-preview="lumen"] .tp-white .tp-swatch { background: #ffd9b0; }
+.theme-preview[data-theme-preview="lumen"] :is(.tp-hue, .tp-warm) {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  outline: 0;
+}
+.theme-preview[data-theme-preview="lumen"] .tp-hue { background: linear-gradient(90deg, #ff3b30, #ffcc00, #34c759, #32d6ff, #3a5bff, #e04cff, #ff3b30); }
+.theme-preview[data-theme-preview="lumen"] .tp-warm { background: linear-gradient(90deg, #ff9a2e, #ffe3c2 45%, #f6f4f2 62%, #d6e2ff); }
+.theme-preview[data-theme-preview="lumen"] :is(.tp-hue, .tp-warm) .tp-knob {
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .45);
+}
+.theme-preview[data-theme-preview="lumen"] .tp-hue .tp-knob { left: 8%; }
+.theme-preview[data-theme-preview="lumen"] .tp-warm .tp-knob { left: 38%; }

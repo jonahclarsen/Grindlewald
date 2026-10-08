@@ -1,0 +1,105 @@
+/* Aura preview tile: near-black space lit by a warm glow, glass sheets, orb presets, floating pill dock. */
+.theme-preview[data-theme-preview="aura"] {
+  isolation: isolate;
+  background:
+    radial-gradient(70% 48% at 42% 22%, rgba(255, 92, 40, 0.55), rgba(255, 92, 40, 0.16) 55%, transparent 80%),
+    radial-gradient(60% 40% at 90% 100%, rgba(255, 60, 110, 0.2), transparent 75%),
+    #0a0a10;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+.theme-preview[data-theme-preview="aura"] .tp-header { height: 13%; gap: 5%; padding: 0 9%; }
+.theme-preview[data-theme-preview="aura"] .tp-mark { width: 5%; border-radius: 50%; background: #ff6a3a; box-shadow: 0 0 4px 1px rgba(255, 106, 58, 0.7); }
+.theme-preview[data-theme-preview="aura"] .tp-title { width: 32%; height: 2px; border-radius: 2px; background: rgba(240, 238, 250, 0.6); }
+.theme-preview[data-theme-preview="aura"] .tp-header::after {
+  content: "";
+  margin-left: auto;
+  width: 26%;
+  height: 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: radial-gradient(circle at 6px 50%, #8fe3bf 0 1.5px, transparent 2px), rgba(255, 255, 255, 0.06);
+}
+.theme-preview[data-theme-preview="aura"] .tp-body { gap: 4px; padding: 2% 8% 0; }
+
+/* Hero: big numeral + fat glowing brightness pill + pills. */
+.theme-preview[data-theme-preview="aura"] .tp-power { order: -1; gap: 4px 3px; padding: 0 0 2px; background: none; }
+.theme-preview[data-theme-preview="aura"] .tp-power::before {
+  content: "40%";
+  order: -1;
+  flex: 1 0 auto;
+  font: 600 19px/0.95 ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(255, 110, 60, 0.6);
+}
+.theme-preview[data-theme-preview="aura"] .tp-power .tp-level {
+  order: 1;
+  height: 9px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 80, 34, 0.45), #ff5a26 42%, rgba(255, 255, 255, 0.07) 42%);
+  box-shadow: 0 0 8px rgba(255, 80, 34, 0.45), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+.theme-preview[data-theme-preview="aura"] .tp-power .tp-knob { left: 42%; width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle, #ff5a26 0 1.5px, #fff 2px); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.theme-preview[data-theme-preview="aura"] .tp-power .tp-button {
+  order: 0;
+  flex: 0 0 26%;
+  height: 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.07);
+}
+.theme-preview[data-theme-preview="aura"] .tp-power .tp-button.tp-accent { order: -1; background: rgba(255, 90, 40, 0.38); border-color: rgba(255, 120, 80, 0.6); box-shadow: 0 0 5px rgba(255, 90, 40, 0.4); }
+
+/* Orb presets, made from the floodlight card. */
+.theme-preview[data-theme-preview="aura"] .tp-flood { order: 0; justify-content: space-between; gap: 0; padding: 2px 4% 3px; background: none; }
+.theme-preview[data-theme-preview="aura"] .tp-flood .tp-label { display: none; }
+.theme-preview[data-theme-preview="aura"] .tp-flood::before,
+.theme-preview[data-theme-preview="aura"] .tp-flood::after,
+.theme-preview[data-theme-preview="aura"] .tp-flood .tp-button {
+  content: "";
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 50%;
+}
+.theme-preview[data-theme-preview="aura"] .tp-flood::before { order: -1; background: radial-gradient(circle at 35% 30%, #fff, #d6e1ff 60%); box-shadow: 0 0 5px rgba(214, 225, 255, 0.6); }
+.theme-preview[data-theme-preview="aura"] .tp-flood .tp-button { background: radial-gradient(circle at 35% 30%, #ffd9a8, #ff8912 60%); box-shadow: 0 0 5px rgba(255, 137, 18, 0.65); }
+.theme-preview[data-theme-preview="aura"] .tp-flood .tp-button.tp-accent { background: radial-gradient(circle at 35% 30%, #ffb59a, #ff4500 60%); box-shadow: 0 0 5px rgba(255, 69, 0, 0.7); }
+.theme-preview[data-theme-preview="aura"] .tp-flood::after { background: radial-gradient(circle at 35% 30%, #d9b6ff, #8a4dff 60%); box-shadow: 0 0 5px rgba(138, 77, 255, 0.65); }
+
+/* Glass sheets with thick tracks and glowing knobs. */
+.theme-preview[data-theme-preview="aura"] :is(.tp-color, .tp-white) {
+  order: 1;
+  gap: 3px;
+  padding: 4px 5px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)), rgba(14, 14, 22, 0.5);
+}
+.theme-preview[data-theme-preview="aura"] .tp-color { border-color: rgba(255, 110, 70, 0.4); }
+.theme-preview[data-theme-preview="aura"] .tp-label { height: 2px; max-width: 34%; border-radius: 2px; background: rgba(240, 238, 250, 0.7); }
+.theme-preview[data-theme-preview="aura"] .tp-swatch { width: 6px; height: 6px; border-radius: 50%; background: #ff4f22; box-shadow: 0 0 4px rgba(255, 79, 34, 0.8); }
+.theme-preview[data-theme-preview="aura"] .tp-white .tp-swatch { background: #ffd5ad; box-shadow: 0 0 4px rgba(255, 213, 173, 0.7); }
+.theme-preview[data-theme-preview="aura"] :is(.tp-hue, .tp-warm) { height: 6px; border-radius: 999px; }
+.theme-preview[data-theme-preview="aura"] :is(.tp-hue, .tp-warm) .tp-knob { width: 7px; height: 7px; border: 1.5px solid #fff; border-radius: 50%; background: #ff4f22; box-shadow: 0 0 4px rgba(255, 79, 34, 0.9); }
+.theme-preview[data-theme-preview="aura"] .tp-hue .tp-knob { left: 4%; }
+.theme-preview[data-theme-preview="aura"] .tp-warm .tp-knob { left: 35%; background: #ffd5ad; box-shadow: 0 0 4px rgba(255, 213, 173, 0.8); }
+
+/* Floating pill dock. */
+.theme-preview[data-theme-preview="aura"] .tp-nav {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 5%;
+  height: 10%;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  background: rgba(24, 24, 32, 0.75);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+.theme-preview[data-theme-preview="aura"] .tp-tab { border-radius: 999px; background: radial-gradient(circle at 50% 50%, rgba(240, 238, 250, 0.35) 0 1.5px, transparent 2px); }
+.theme-preview[data-theme-preview="aura"] .tp-tab.tp-active { background: radial-gradient(circle at 50% 50%, #ffc4ae 0 1.5px, transparent 2px), rgba(255, 90, 40, 0.36); box-shadow: inset 0 0 0 0.5px rgba(255, 120, 80, 0.7), 0 0 5px rgba(255, 90, 40, 0.45); }

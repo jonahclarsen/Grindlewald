@@ -3,6 +3,7 @@ import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
+import { THEMES, applyTheme, themePreviewMarkup } from "./themes.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
@@ -21,6 +22,7 @@ const demoSettings = {
   breathingIntervalMs: 350,
   breathingColorStep: 1,
   whiteBreathingSweepSeconds: 30,
+  theme: "haligonian",
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -75,6 +77,10 @@ let privilegedService = demoMode
   : { installed: false, healthy: false, current: false, message: "Not installed" };
 
 const $ = (selector) => document.querySelector(selector);
+const root = document.documentElement;
+// ?theme= previews a design without saving it, for development screenshots.
+const themeOverride = new URLSearchParams(location.search).get("theme");
+let activeTheme = null;
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]);
@@ -135,7 +141,9 @@ function whitePositionFromHex(value) {
 function paintHue(hue) {
   const normalizedHue = Math.max(0, Math.min(360, hue));
   $("#hue-knob").style.setProperty("--knob-position", `${normalizedHue / 360 * 100}%`);
-  $("#color-swatch").style.background = colorAtHue(normalizedHue);
+  const color = colorAtHue(normalizedHue);
+  $("#color-swatch").style.background = color;
+  root.style.setProperty("--current-color", color);
   $("#hue-track").setAttribute("aria-valuenow", String(normalizedHue));
 }
 
@@ -168,13 +176,16 @@ function updateHue(hue, shouldSend = true) {
   settings.color = colorAtHue(normalizedHue);
   if (!shouldSend) return;
   settings.mode = "color";
+  root.dataset.lightMode = settings.mode;
   queueControl({ command: "color", value: settings.color, brightness: settings.brightness, device: null });
 }
 
 function paintWhite(position) {
   const normalizedPosition = Math.max(0, Math.min(1, position));
   $("#white-knob").style.setProperty("--knob-position", `${normalizedPosition * 100}%`);
-  $("#white-swatch").style.background = whiteAtPosition(normalizedPosition);
+  const white = whiteAtPosition(normalizedPosition);
+  $("#white-swatch").style.background = white;
+  root.style.setProperty("--current-white", white);
   $("#white-track").setAttribute("aria-valuenow", String(Math.round(normalizedPosition * 100)));
 }
 
@@ -192,6 +203,7 @@ function updateWhite(position, shouldSend = true) {
   settings.white = whiteAtPosition(normalizedPosition);
   if (!shouldSend) return;
   settings.mode = "white";
+  root.dataset.lightMode = settings.mode;
   settings.whiteKelvin = kelvinAtPosition(normalizedPosition);
   queueControl({ command: "white", value: settings.white, kelvin: settings.whiteKelvin, brightness: settings.brightness, device: null });
 }
@@ -287,6 +299,7 @@ function renderConnection() {
   if (!busy || connectionBusyVisible || disconnecting) {
     $("#connection-control").classList.toggle("connected", connected && !disconnecting);
     $("#connection-control").classList.toggle("busy", Boolean(disconnecting || busy));
+    root.dataset.connection = disconnecting || busy ? "busy" : connected ? "connected" : "disconnected";
     $("#connection-label").textContent = disconnecting ? "Disconnecting…"
       : busy ? "Connecting / updating"
       : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""}`
@@ -409,6 +422,9 @@ function renderLightSelection() {
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
+  root.style.setProperty("--brightness", String(settings.brightness));
+  root.dataset.lightMode = settings.mode === "white" ? "white" : "color";
+  syncRangeFill($("#brightness"));
 }
 
 function queueControl(command) {
@@ -424,6 +440,7 @@ function setEffectActive(effect) {
     latestBreathingFrame = null;
   }
   activeEffect = effect;
+  root.dataset.effect = effect ?? "none";
   $("#hue-track").setAttribute("aria-label", effect === "breathe" ? "Breathing hue; drag to move within the cycle" : "Color hue");
   $("#color-picker-hint").textContent = effect === "breathe" ? "Breathing · drag to move" : "Drag to choose a hue";
   if (effect !== "breathe" && settings) paintHue(hueFromHex(settings.color));
@@ -512,6 +529,17 @@ function renderQuickPresets() {
     : '<div class="empty">Add a preset to get started.</div>';
 }
 
+// Exposes each slider's position as --fill (0–1) so designs can draw filled tracks.
+function syncRangeFill(input) {
+  const minimum = Number(input.min || 0);
+  const maximum = Number(input.max || 100);
+  input.style.setProperty("--fill", String((Number(input.value) - minimum) / (maximum - minimum || 1)));
+}
+
+function syncRangeFills() {
+  document.querySelectorAll('input[type="range"]').forEach(syncRangeFill);
+}
+
 function renderPresets() {
   $("#preset-editor").innerHTML = settings.presets.length ? settings.presets.map((preset, index) => {
     const editorKey = `preset:${index}`;
@@ -534,6 +562,7 @@ function renderPresets() {
       </div>
     </article>`;
   }).join("") : '<div class="empty">No presets yet. Add one with ＋.</div>';
+  syncRangeFills();
 }
 
 function renderSchedules() {
@@ -546,7 +575,7 @@ function renderSchedules() {
     if (!automationEditors.expandedIds.has(schedule.id)) {
       const [hours, minutes] = schedule.time.split(":").map(Number);
       const time = new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small>Every day at ${escapeHtml(time)}</small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" data-enabled="${enabled}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small class="schedule-when">Every day at <time class="schedule-time" datetime="${escapeHtml(schedule.time)}">${escapeHtml(time)}</time></small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     const floodlightAction = schedule.floodlights || "unchanged";
     const systemAppearance = schedule.systemAppearance || "unchanged";
@@ -646,6 +675,8 @@ function refreshScheduleAvailability() {
     const label = schedulePauseLabel(schedule);
     status.textContent = label;
     status.hidden = !label;
+    const summary = status.closest("[data-expand-schedule]");
+    if (summary) summary.dataset.enabled = String(isScheduleEnabled(schedule));
     const card = status.closest("[data-schedule-index]");
     if (!card) return;
     const enabled = isScheduleEnabled(schedule);
@@ -706,6 +737,11 @@ function renderBreathingControls() {
   const sweepLabel = `${settings.whiteBreathingSweepSeconds} s each way`;
   $("#white-breathing-sweep-output").value = sweepLabel;
   $("#white-breathing-sweep").setAttribute("aria-valuetext", sweepLabel);
+  syncRangeFills();
+}
+
+function renderThemePicker() {
+  $("#theme-picker").innerHTML = THEMES.map((theme) => `<button class="theme-option" data-theme-option="${theme.id}" aria-pressed="${theme.id === activeTheme}">${themePreviewMarkup(theme.id)}<span class="theme-option-copy"><strong>${escapeHtml(theme.name)}</strong><small>${escapeHtml(theme.description)}</small></span></button>`).join("");
 }
 
 function renderAll() {
@@ -719,6 +755,8 @@ function renderAll() {
   renderDevices();
   renderExperimentTargets();
   renderPrivilegedService();
+  renderThemePicker();
+  syncRangeFills();
 }
 
 function uniqueId() {
@@ -806,6 +844,13 @@ document.addEventListener("click", async (event) => {
 
   const pageButton = event.target.closest("[data-page], [data-page-link]");
   if (pageButton) showPage(pageButton.dataset.page || pageButton.dataset.pageLink);
+
+  const themeOption = event.target.closest("[data-theme-option]");
+  if (themeOption) {
+    activeTheme = settings.theme = applyTheme(themeOption.dataset.themeOption);
+    document.querySelectorAll("[data-theme-option]").forEach((option) => option.setAttribute("aria-pressed", String(option === themeOption)));
+    await save();
+  }
 
   const presetButton = event.target.closest("[data-preset]");
   if (presetButton) queueControl({ command: "preset", name: presetButton.dataset.preset, device: null });
@@ -924,6 +969,7 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches('input[type="range"]')) syncRangeFill(event.target);
   if (event.target.matches('textarea[data-schedule-field="shellCommand"]')) {
     sizeShellCommandInput(event.target);
   }
@@ -1058,6 +1104,7 @@ $("#white-track").addEventListener("keydown", (event) => {
 $("#brightness").addEventListener("input", (event) => {
   settings.brightness = Number(event.target.value) / 100;
   $("#brightness-output").value = `${event.target.value}%`;
+  root.style.setProperty("--brightness", String(settings.brightness));
   queueControl({ command: "brightness", value: settings.brightness, device: null });
 });
 $("#brightness").addEventListener("change", save);
@@ -1256,6 +1303,7 @@ if (window.__TAURI__?.event?.listen) {
 }
 
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");
+activeTheme = applyTheme(themeOverride || settings.theme);
 await refreshPrivilegedService();
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");

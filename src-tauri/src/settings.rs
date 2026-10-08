@@ -148,6 +148,9 @@ pub struct Settings {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub schedules: Vec<Schedule>,
+    // The interface design chosen in Settings; unknown names fall back in the UI.
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_color() -> String {
@@ -164,6 +167,10 @@ fn default_brightness() -> f32 {
 
 fn default_mode() -> LightMode {
     LightMode::Color
+}
+
+fn default_theme() -> String {
+    "haligonian".into()
 }
 
 fn default_connection_hold_seconds() -> u64 {
@@ -217,6 +224,7 @@ impl Default for Settings {
                 },
             ],
             schedules: Vec::new(),
+            theme: default_theme(),
         }
     }
 }
@@ -409,6 +417,19 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_defaults_for_old_settings_and_round_trips() {
+        let old: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(old.theme, "haligonian");
+        let settings = Settings {
+            theme: "phosphor".into(),
+            ..Settings::default()
+        };
+        let restored: Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.theme, "phosphor");
+    }
 
     #[test]
     fn white_breathing_pace_defaults_for_old_settings_and_round_trips() {

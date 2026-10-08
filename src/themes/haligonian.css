@@ -181,3 +181,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .service-notice p { margin-top: 4px; color: #edc496; font-size: 11px; line-height: 1.4; }
 .service-notice button { flex-shrink: 0; }
 .primary:disabled { cursor: wait; opacity: .62; }
+
+.theme-option { border: 2px outset #5293a3; border-radius: 0; background: #292929; box-shadow: none; padding: 5px; }
+.theme-option[aria-pressed="true"] { border: 2px inset var(--orange); background: var(--teal-dark); box-shadow: none; }
+.theme-option[aria-pressed="true"] .theme-option-copy strong { color: #ffb078; }
+.theme-option-copy strong { font: bold 11px var(--pixel); }
+.theme-option-copy small { color: #c2dde3; }

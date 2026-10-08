@@ -1,0 +1,167 @@
+/* Nocturne preview tile: ink page, centred serif masthead, top text-nav, hairline-ruled sections, one amber accent. */
+.theme-preview[data-theme-preview="nocturne"] {
+  counter-reset: tp-noct;
+  background: radial-gradient(120% 40% at 50% -8%, rgba(226, 168, 91, .1), transparent 70%), #12100e;
+  border: 1px solid rgba(239, 230, 214, .14);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-header {
+  order: 0;
+  height: auto;
+  padding: 9% 7% 4%;
+  justify-content: center;
+  gap: 0;
+  background: none;
+  border: 0;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-mark { display: none; }
+.theme-preview[data-theme-preview="nocturne"] .tp-title {
+  width: auto;
+  height: auto;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-title::before {
+  content: "Grindlewald";
+  display: block;
+  color: #efe6d6;
+  font: 400 13px/1 "Iowan Old Style", ui-serif, Georgia, serif;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-nav {
+  order: 1;
+  height: 9%;
+  margin: 0 7%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7%;
+  background: none;
+  border: 0;
+  border-top: 3px double rgba(239, 230, 214, .3);
+  border-bottom: 1px solid rgba(239, 230, 214, .14);
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-tab {
+  position: relative;
+  flex: 0 0 17%;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: #8f8576;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-tab + .tp-tab::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -22%;
+  width: 2px;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 50%;
+  background: #6c645a;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-tab.tp-active { background: #e2a85b; box-shadow: 0 4px 0 -1px #e2a85b; }
+.theme-preview[data-theme-preview="nocturne"] .tp-body {
+  order: 2;
+  gap: 0;
+  padding: 2% 7% 4%;
+  background: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-card {
+  counter-increment: tp-noct;
+  position: relative;
+  flex: 1;
+  align-content: center;
+  gap: 3px 4px;
+  padding: 0 0 0 15%;
+  background: none;
+  border: 0;
+  border-top: 1px solid rgba(239, 230, 214, .13);
+  border-radius: 0;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-flood { border-top: 0; }
+.theme-preview[data-theme-preview="nocturne"] .tp-card::before {
+  content: counter(tp-noct, upper-roman);
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8f8576;
+  font: 7px/1 "Iowan Old Style", ui-serif, Georgia, serif;
+  font-variant-caps: all-small-caps;
+}
+.theme-preview[data-theme-preview="nocturne"] :is(.tp-color, .tp-white)::before { top: 30%; }
+.theme-preview[data-theme-preview="nocturne"] .tp-label {
+  flex: 0 0 34%;
+  max-width: none;
+  height: 3px;
+  border: 0;
+  border-radius: 1px;
+  background: #efe6d6;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-swatch {
+  width: 4px;
+  height: 4px;
+  margin-left: 2px;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #12100e, 0 0 0 1.6px rgba(239, 230, 214, .35);
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-color .tp-swatch { background: #ff4f22; }
+.theme-preview[data-theme-preview="nocturne"] .tp-white .tp-swatch { background: #ffd5ad; }
+.theme-preview[data-theme-preview="nocturne"] .tp-track {
+  height: 1.5px;
+  margin: 3px 0 1px;
+  border: 0;
+  border-radius: 1px;
+  outline: 0;
+  box-shadow: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-knob {
+  width: 5px;
+  height: 5px;
+  border: 1px solid #efe6d6;
+  border-radius: 50%;
+  background: #12100e;
+  box-shadow: 0 0 0 1px #12100e;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-hue .tp-knob { left: 8%; background: #ff4f22; }
+.theme-preview[data-theme-preview="nocturne"] .tp-warm .tp-knob { left: 36%; background: #ffd5ad; }
+.theme-preview[data-theme-preview="nocturne"] .tp-flood .tp-button {
+  flex: 0 0 11%;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: rgba(239, 230, 214, .75);
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-flood .tp-button:first-of-type { margin-left: auto; }
+.theme-preview[data-theme-preview="nocturne"] .tp-flood .tp-button.tp-accent { flex-basis: 18%; }
+.theme-preview[data-theme-preview="nocturne"] .tp-power::after {
+  content: "40%";
+  order: -1;
+  display: block;
+  color: #e2a85b;
+  font: 400 11px/1 "Iowan Old Style", ui-serif, Georgia, serif;
+  font-variant-numeric: lining-nums;
+  letter-spacing: -.02em;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-level {
+  flex: 1 1 60%;
+  height: 1.5px;
+  margin: 0 0 0 3px;
+  background: linear-gradient(90deg, #efe6d6 40%, rgba(239, 230, 214, .25) 0);
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-level .tp-knob { left: 40%; background: #12100e; }
+.theme-preview[data-theme-preview="nocturne"] .tp-power .tp-button {
+  flex: 0 0 30%;
+  height: 6px;
+  border: 1px solid rgba(239, 230, 214, .3);
+  border-radius: 99px;
+  background: none;
+}
+.theme-preview[data-theme-preview="nocturne"] .tp-power .tp-button.tp-accent { border-color: #efe6d6; background: #efe6d6; }

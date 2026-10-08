@@ -1,0 +1,20 @@
+/* Haligonian preview tile: teal title bars, beveled dark panels, orange actions. */
+.theme-preview[data-theme-preview="haligonian"] { background: #1a1a1a; border: 1px solid #003d4d; }
+.theme-preview[data-theme-preview="haligonian"] .tp-header { background: linear-gradient(#003d4d, #006c86); border-bottom: 1px solid #88ccdd; }
+.theme-preview[data-theme-preview="haligonian"] .tp-mark { background: #003d4d; border: 1px solid #88ccdd; box-shadow: inset 0 0 0 2px #003d4d, inset 0 0 0 4px #e26812; }
+.theme-preview[data-theme-preview="haligonian"] .tp-title { height: 5px; background: #e9f2f6; box-shadow: 1px 1px #003d4d; }
+.theme-preview[data-theme-preview="haligonian"] .tp-body { gap: 4px; padding: 5% 6%; }
+.theme-preview[data-theme-preview="haligonian"] .tp-card { background: #222; border: 1px solid #003d4d; box-shadow: inset 1px 1px 0 #88ccdd44; }
+.theme-preview[data-theme-preview="haligonian"] :is(.tp-color, .tp-white) { padding-top: 0; }
+.theme-preview[data-theme-preview="haligonian"] :is(.tp-color, .tp-white) .tp-label { flex: 0 0 calc(100% + 8px); max-width: none; height: 7px; margin: 0 -4px 1px; background: linear-gradient(90deg, #003d4d, #006c86); border-bottom: 1px solid #006c86; }
+.theme-preview[data-theme-preview="haligonian"] :is(.tp-color, .tp-white) .tp-swatch { display: none; }
+.theme-preview[data-theme-preview="haligonian"] .tp-flood .tp-label { background: #e9f2f6; opacity: .75; }
+.theme-preview[data-theme-preview="haligonian"] .tp-track { height: 5px; outline: 1px solid #000; }
+.theme-preview[data-theme-preview="haligonian"] .tp-level { height: 3px; margin: 2px 0; background: #555; border-radius: 2px; }
+.theme-preview[data-theme-preview="haligonian"] .tp-knob { width: 3px; height: 8px; background: transparent; border: 1px solid #fff; }
+.theme-preview[data-theme-preview="haligonian"] .tp-level .tp-knob { width: 5px; height: 5px; border: 0; border-radius: 50%; background: #88ccdd; left: 40%; }
+.theme-preview[data-theme-preview="haligonian"] .tp-button { height: 7px; background: linear-gradient(#3a3a3a, #292929); border: 1px solid #626262; }
+.theme-preview[data-theme-preview="haligonian"] .tp-button.tp-accent { background: linear-gradient(#f38b3e, #e26812); border-color: #ffb078; }
+.theme-preview[data-theme-preview="haligonian"] .tp-nav { background: #003d4d; border-top: 1px solid #88ccdd; }
+.theme-preview[data-theme-preview="haligonian"] .tp-tab { border-right: 1px solid #002a35; }
+.theme-preview[data-theme-preview="haligonian"] .tp-tab.tp-active { background: #006c86; box-shadow: inset 0 2px #ff8833; }

@@ -5,7 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Grindlewald</title>
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="haligonian.css" />
+    <link rel="stylesheet" href="themes/haligonian.css" data-theme-stylesheet />
+    <link rel="stylesheet" href="themes/haligonian-preview.css" />
+    <link rel="stylesheet" href="themes/lumen-preview.css" />
+    <link rel="stylesheet" href="themes/module-preview.css" />
+    <link rel="stylesheet" href="themes/nocturne-preview.css" />
+    <link rel="stylesheet" href="themes/aura-preview.css" />
+    <link rel="stylesheet" href="themes/phosphor-preview.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
@@ -142,6 +148,10 @@
         <div id="discovered-devices" class="stack" aria-live="polite"></div>
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
+
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Look &amp; feel</span><h3>Design</h3></div></div>
+        <p class="page-copy">Same controls, different layout. Saved with your settings.</p>
+        <div id="theme-picker" class="theme-picker" role="group" aria-label="Design"></div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 
