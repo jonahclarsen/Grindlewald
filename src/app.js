@@ -3,7 +3,6 @@ import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, summarizeError } from "./errors.js";
-import { THEMES, applyTheme, themePreviewMarkup } from "./themes.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
@@ -22,7 +21,6 @@ const demoSettings = {
   breathingIntervalMs: 350,
   breathingColorStep: 1,
   whiteBreathingSweepSeconds: 30,
-  theme: "haligonian",
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -59,14 +57,8 @@ let breathingSeekRequestId = 0;
 let whitePointerDown = false;
 let huePointerDown = false;
 let activeEffect = null;
-let connectionStatus = null;
-let disconnecting = false;
-let controlGeneration = 0;
 let controlsInFlight = 0;
-let connectionBusyTimer = null;
-let connectionBusyVisible = false;
-let refreshingConnection = false;
-let demoConnectedUntil = 0;
+let refreshingEffectState = false;
 let demoEffectActive = false;
 let expandedEditorKey = null;
 const automationEditors = createAutomationEditorState();
@@ -78,9 +70,6 @@ let privilegedService = demoMode
 
 const $ = (selector) => document.querySelector(selector);
 const root = document.documentElement;
-// ?theme= previews a design without saving it, for development screenshots.
-const themeOverride = new URLSearchParams(location.search).get("theme");
-let activeTheme = null;
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]);
@@ -166,7 +155,6 @@ function updateHue(hue, shouldSend = true) {
   const normalizedHue = Math.max(0, Math.min(360, hue));
   paintHue(normalizedHue);
   if (shouldSend && activeEffect === "breathe") {
-    if (disconnecting) return;
     return breathingSeekQueue.enqueue({
       command: "seek_breathing",
       position: Math.round(normalizedHue / 360 * 1530) % 1530,
@@ -193,7 +181,6 @@ function updateWhite(position, shouldSend = true) {
   const normalizedPosition = Math.max(0, Math.min(1, position));
   paintWhite(normalizedPosition);
   if (shouldSend && activeEffect === "white-breathe") {
-    if (disconnecting) return;
     return breathingSeekQueue.enqueue({
       command: "seek_breathing",
       position: whiteSeekPhase(normalizedPosition, latestBreathingFrame?.position),
@@ -278,110 +265,41 @@ function setFloodlightsBusy(isBusy) {
   });
 }
 
-function renderConnection() {
-  const button = $("#connection-button");
-  const connected = (connectionStatus?.connectedCount ?? 0) > 0;
-  const busy = controlsInFlight > 0 || (connectionStatus && (
-    connectionStatus.connectedCount === null || (connectionStatus.effectActive && !connected)
-  ));
-  if (!busy || disconnecting) {
-    clearTimeout(connectionBusyTimer);
-    connectionBusyTimer = null;
-    connectionBusyVisible = false;
-  } else if (connectionBusyTimer === null && !connectionBusyVisible) {
-    connectionBusyTimer = setTimeout(() => {
-      connectionBusyTimer = null;
-      connectionBusyVisible = true;
-      renderConnection();
-    }, 200);
-  }
-  // Keep the previous status during quick updates, including its visual styling.
-  if (!busy || connectionBusyVisible || disconnecting) {
-    $("#connection-control").classList.toggle("connected", connected && !disconnecting);
-    $("#connection-control").classList.toggle("busy", Boolean(disconnecting || busy));
-    root.dataset.connection = disconnecting || busy ? "busy" : connected ? "connected" : "disconnected";
-    $("#connection-label").textContent = disconnecting ? "Disconnecting…"
-      : busy ? "Connecting / updating"
-      : connected ? `Connected${connectionStatus.connectedCount > 1 ? ` (${connectionStatus.connectedCount} lights)` : ""}`
-      : connectionStatus ? "Disconnected" : "Status unavailable";
-  }
-  button.disabled = disconnecting || (connectionStatus !== null && !connected && !busy);
-  button.setAttribute("aria-busy", String(disconnecting));
-  button.textContent = disconnecting ? "Closing…" : "Disconnect";
-  button.title = connected
-    ? "Keeping the Bluetooth connection open. Click to disconnect and stop effects."
-    : busy ? "Click to cancel light changes and close the Bluetooth connection."
-    : "Light controls reconnect automatically when used.";
-}
-
-async function refreshConnection() {
-  if (refreshingConnection || disconnecting) return;
-  refreshingConnection = true;
-  const generation = controlGeneration;
+// Mirror effects started or stopped elsewhere (CLI, automations) and follow breathing playback.
+async function refreshEffectState() {
+  if (refreshingEffectState) return;
+  refreshingEffectState = true;
   try {
     const status = await call("connection_status");
-    if (generation === controlGeneration) {
-      connectionStatus = status;
-      if (!status.effectActive && controlsInFlight === 0) setEffectActive(null);
-      else if (status.breathing && controlsInFlight === 0) {
-        const effect = status.breathing.mode === "white" ? "white-breathe" : "breathe";
-        if (activeEffect !== effect) setEffectActive(effect);
-        applyBreathingPlayback(status.breathing);
-      }
+    if (!status.effectActive && controlsInFlight === 0) setEffectActive(null);
+    else if (status.breathing && controlsInFlight === 0) {
+      const effect = status.breathing.mode === "white" ? "white-breathe" : "breathe";
+      if (activeEffect !== effect) setEffectActive(effect);
+      applyBreathingPlayback(status.breathing);
     }
   } catch {
-    if (generation === controlGeneration) connectionStatus = null;
+    // The next poll tries again.
   } finally {
-    refreshingConnection = false;
-    renderConnection();
-  }
-}
-
-async function disconnectLights() {
-  if (disconnecting) return;
-  disconnecting = true;
-  controlGeneration += 1;
-  controlQueue.clear();
-  setEffectActive(null);
-  renderConnection();
-  try {
-    setStatus(await call("disconnect_lights"));
-  } catch (error) {
-    setStatus(String(error), "error");
-  } finally {
-    disconnecting = false;
-    await refreshConnection();
+    refreshingEffectState = false;
   }
 }
 
 async function call(command, args = {}) {
   if (command !== "execute_control") return callBackend(command, args);
-  if (disconnecting) throw new Error("Disconnect in progress");
   controlsInFlight += 1;
-  renderConnection();
   try {
     return await callBackend(command, args);
   } finally {
     controlsInFlight -= 1;
-    renderConnection();
-    await refreshConnection();
+    await refreshEffectState();
   }
 }
 
 async function callBackend(command, args = {}) {
   if (demoMode) {
-    if (command === "connection_status") return {
-      connectedCount: demoEffectActive || Date.now() < demoConnectedUntil ? 2 : 0,
-      effectActive: demoEffectActive,
-    };
-    if (command === "disconnect_lights") {
-      demoEffectActive = false;
-      demoConnectedUntil = 0;
-      return "Disconnected from lights";
-    }
-    if (command === "execute_control") {
-      if (!["seek_breathing", "set_white_breathing_pace"].includes(args.command.command)) demoEffectActive = ["party", "breathe", "breathe_white"].includes(args.command.command);
-      demoConnectedUntil = Date.now() + settings.connectionHoldSeconds * 1000;
+    if (command === "connection_status") return { effectActive: demoEffectActive };
+    if (command === "execute_control" && !["seek_breathing", "set_white_breathing_pace"].includes(args.command.command)) {
+      demoEffectActive = ["party", "breathe", "breathe_white"].includes(args.command.command);
     }
     if (command === "home_network_status") return { fingerprint: "router-sha256:" + "0".repeat(64) };
     if (command === "get_settings") return structuredClone(demoSettings);
@@ -422,13 +340,11 @@ function renderLightSelection() {
   updateWhite(whitePositionFromHex(settings.white), false);
   $("#brightness").value = Math.round(settings.brightness * 100);
   $("#brightness-output").value = `${Math.round(settings.brightness * 100)}%`;
-  root.style.setProperty("--brightness", String(settings.brightness));
   root.dataset.lightMode = settings.mode === "white" ? "white" : "color";
   syncRangeFill($("#brightness"));
 }
 
 function queueControl(command) {
-  if (disconnecting) return;
   setEffectActive(null);
   return controlQueue.enqueue(command);
 }
@@ -440,7 +356,6 @@ function setEffectActive(effect) {
     latestBreathingFrame = null;
   }
   activeEffect = effect;
-  root.dataset.effect = effect ?? "none";
   $("#hue-track").setAttribute("aria-label", effect === "breathe" ? "Breathing hue; drag to move within the cycle" : "Color hue");
   $("#color-picker-hint").textContent = effect === "breathe" ? "Breathing · drag to move" : "Drag to choose a hue";
   if (effect !== "breathe" && settings) paintHue(hueFromHex(settings.color));
@@ -477,7 +392,8 @@ async function refreshHomeNetwork() {
       currentHomeNetwork = null;
       currentNetworkState = "error";
     }
-    setStatus(String(error), "error");
+    // Background checks only update the inline help; choosing the home-network option reports failures.
+    console.warn("Home network lookup failed:", error);
   } finally {
     networkRefreshing -= 1;
   }
@@ -740,10 +656,6 @@ function renderBreathingControls() {
   syncRangeFills();
 }
 
-function renderThemePicker() {
-  $("#theme-picker").innerHTML = THEMES.map((theme) => `<button class="theme-option" data-theme-option="${theme.id}" aria-pressed="${theme.id === activeTheme}">${themePreviewMarkup(theme.id)}<span class="theme-option-copy"><strong>${escapeHtml(theme.name)}</strong><small>${escapeHtml(theme.description)}</small></span></button>`).join("");
-}
-
 function renderAll() {
   renderLightSelection();
   if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
@@ -755,7 +667,6 @@ function renderAll() {
   renderDevices();
   renderExperimentTargets();
   renderPrivilegedService();
-  renderThemePicker();
   syncRangeFills();
 }
 
@@ -844,13 +755,6 @@ document.addEventListener("click", async (event) => {
 
   const pageButton = event.target.closest("[data-page], [data-page-link]");
   if (pageButton) showPage(pageButton.dataset.page || pageButton.dataset.pageLink);
-
-  const themeOption = event.target.closest("[data-theme-option]");
-  if (themeOption) {
-    activeTheme = settings.theme = applyTheme(themeOption.dataset.themeOption);
-    document.querySelectorAll("[data-theme-option]").forEach((option) => option.setAttribute("aria-pressed", String(option === themeOption)));
-    await save();
-  }
 
   const presetButton = event.target.closest("[data-preset]");
   if (presetButton) queueControl({ command: "preset", name: presetButton.dataset.preset, device: null });
@@ -1090,13 +994,13 @@ for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
 }
 makeDraggable($("#white-track"), updateWhite);
 $("#hue-track").addEventListener("keydown", (event) => {
-  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  if (event.metaKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
   updateHue(Number(event.currentTarget.getAttribute("aria-valuenow")) + (event.key === "ArrowRight" ? 3 : -3));
   if (activeEffect !== "breathe") save();
 });
 $("#white-track").addEventListener("keydown", (event) => {
-  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  if (event.metaKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
   event.preventDefault();
   updateWhite(Number(event.currentTarget.getAttribute("aria-valuenow")) / 100 + (event.key === "ArrowRight" ? 0.02 : -0.02));
   if (activeEffect !== "white-breathe") save();
@@ -1104,20 +1008,16 @@ $("#white-track").addEventListener("keydown", (event) => {
 $("#brightness").addEventListener("input", (event) => {
   settings.brightness = Number(event.target.value) / 100;
   $("#brightness-output").value = `${event.target.value}%`;
-  root.style.setProperty("--brightness", String(settings.brightness));
   queueControl({ command: "brightness", value: settings.brightness, device: null });
 });
 $("#brightness").addEventListener("change", save);
 
 async function toggleEffect(effect) {
-  if (disconnecting) return;
-  const generation = controlGeneration;
   const starting = activeEffect !== effect;
   setStatus(starting ? `Starting ${effect}…` : `Stopping ${effect}…`, "busy");
   try {
     if (starting && activeEffect) {
       await call("execute_control", { command: { command: "stop_effect" } });
-      if (generation !== controlGeneration) return;
       setEffectActive(null);
     }
     const message = await call("execute_control", {
@@ -1134,11 +1034,9 @@ async function toggleEffect(effect) {
             }
         : { command: "stop_effect" },
     });
-    if (generation !== controlGeneration) return;
     setEffectActive(starting && !message.includes("Bluetooth is off") ? effect : null);
     setStatus(message);
   } catch (error) {
-    if (generation !== controlGeneration) return;
     setEffectActive(null);
     setStatus(String(error), "error");
   }
@@ -1154,14 +1052,12 @@ $("#white-breathing-sweep").addEventListener("input", (event) => {
 $("#white-breathing-sweep").addEventListener("change", async () => {
   if (!await save()) return;
   if (activeEffect === "white-breathe") {
-    const generation = controlGeneration;
     try {
-      const message = await call("execute_control", {
+      setStatus(await call("execute_control", {
         command: whiteBreathingPaceCommand(settings.whiteBreathingSweepSeconds),
-      });
-      if (generation === controlGeneration) setStatus(message);
+      }));
     } catch (error) {
-      if (generation === controlGeneration) setStatus(String(error), "error");
+      setStatus(String(error), "error");
     }
   }
 });
@@ -1172,9 +1068,8 @@ $("#breathing-interval").addEventListener("input", (event) => {
 $("#breathing-interval").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
-    const generation = controlGeneration;
     await toggleEffect("breathe");
-    if (generation === controlGeneration) await toggleEffect("breathe");
+    await toggleEffect("breathe");
   }
 });
 $("#breathing-color-step").addEventListener("input", (event) => {
@@ -1185,9 +1080,8 @@ $("#breathing-color-step").addEventListener("input", (event) => {
 $("#breathing-color-step").addEventListener("change", async () => {
   await save();
   if (activeEffect === "breathe") {
-    const generation = controlGeneration;
     await toggleEffect("breathe");
-    if (generation === controlGeneration) await toggleEffect("breathe");
+    await toggleEffect("breathe");
   }
 });
 
@@ -1265,26 +1159,28 @@ $("#privileged-service-remove").addEventListener("click", async () => {
     renderSchedules();
   } catch (error) { setStatus(String(error), "error"); }
 });
-$("#connection-button").addEventListener("click", disconnectLights);
-window.addEventListener("focus", refreshConnection);
+window.addEventListener("focus", refreshEffectState);
 window.addEventListener("focus", refreshScheduleAvailability);
 setInterval(refreshScheduleAvailability, 1000);
-setInterval(refreshConnection, 500);
-refreshConnection();
+setInterval(refreshEffectState, 500);
+refreshEffectState();
 
-$("#close-button").addEventListener("click", () => call("hide_window"));
 $("#quit-button").addEventListener("click", () => call("quit_app"));
+
+const pageOrder = ["controller-page", "automations-page", "settings-page"];
+// ⌘← and ⌘→ keep their usual line-start/line-end meaning inside text fields.
+const editsText = (element) => element.matches?.('textarea, [contenteditable], input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"])');
 
 document.addEventListener("keydown", (event) => {
   if ($("#remove-schedule-dialog").open) return;
-  const shortcuts = {
-    "1": "controller-page",
-    "2": "automations-page",
-    "3": "settings-page",
-  };
-  if (event.metaKey && shortcuts[event.key]) {
+  const pageIndex = pageOrder.findIndex((id) => $(`#${id}`).classList.contains("active"));
+  const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+  if (event.metaKey && !event.altKey && !event.ctrlKey && /^[1-3]$/.test(event.key)) {
     event.preventDefault();
-    showPage(shortcuts[event.key]);
+    showPage(pageOrder[Number(event.key) - 1]);
+  } else if (event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey && step && !editsText(event.target)) {
+    event.preventDefault();
+    showPage(pageOrder[Math.max(0, Math.min(pageOrder.length - 1, pageIndex + step))]);
   } else if (event.key === "Escape") {
     event.preventDefault();
     call("hide_window");
@@ -1303,7 +1199,6 @@ if (window.__TAURI__?.event?.listen) {
 }
 
 settings = demoMode ? structuredClone(demoSettings) : await call("get_settings");
-activeTheme = applyTheme(themeOverride || settings.theme);
 await refreshPrivilegedService();
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");

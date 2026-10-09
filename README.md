@@ -13,7 +13,6 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - A custom click-and-drag hue control for RGB mode and warm-to-cool slider for dedicated-white mode
 - Dragging either control switches light mode immediately
 - Configurable BLE connection hold time, making follow-up color changes fast
-- Live Bluetooth connection status with one-click disconnect, cancelling pending changes and stopping streamed effects
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
 - Breathing mode with 1–100 integer RGB color steps and a fixed 250–1,000 ms interval in 50 ms increments; defaults to step 1 and 350 ms
@@ -30,8 +29,8 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Failed automation light actions retry every 15 minutes for up to six hours when no target succeeds; retries stop on success and never repeat shell or floodlight actions
 - Optional trusted shell commands run normally or unattended through one root-owned helper after per-command macOS approval
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too
-- Six interface designs (Haligonian, Lumen, Module, Nocturne, Aura, and Phosphor), each a different layout of the same controls, chosen in Settings from miniature preview tiles
-- Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, and Escape to dismiss
+- A native macOS look that follows Light and Dark appearance and your accent color
+- Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, ⌘← and ⌘→ for the previous and next page, and Escape to dismiss
 
 ## Setup
 
@@ -57,7 +56,7 @@ That file is local runtime data. It is ignored by Git and is never compiled into
 
 The Floodlights buttons run `shortcut_set_floodlights.py on` or `shortcut_set_floodlights.py off` from the parent Govee project. Grindlewald uses the `govee` Miniconda environment when it is available. Set `GRINDLEWALD_FLOODLIGHT_SCRIPT` or `GRINDLEWALD_FLOODLIGHT_PYTHON` in the app environment to override either path without storing machine-specific configuration in this repository.
 
-Errors appear in a compact panel above the navigation without moving the controls. The panel shows a short explanation and a scrollable monospace preview positioned at the end of the error. **Show details** expands the preview; **Copy error** copies the complete original message, including the traceback. Errors stay available across pages and later status updates until dismissed or replaced by another error.
+Errors appear in a compact floating panel without moving the controls. The panel shows a short explanation and a scrollable monospace preview positioned at the end of the error. **Show details** expands the preview; **Copy error** copies the complete original message, including the traceback. Errors stay available across pages and later status updates until dismissed or replaced by another error.
 
 If floodlight control reports `Bad file descriptor` while connecting to TP-Link, check whether a firewall such as Little Snitch is blocking Grindlewald or its Python subprocess from reaching `wap.tplinkcloud.com` over HTTPS. A successful connection from Terminal alone does not verify network access for the menu-bar app.
 
@@ -171,7 +170,7 @@ White breathing is available in the White card and from `grindlewaldctl breathe-
 
 To measure color breathing without changing its timing, run `grindlewaldctl trace-breathing --seconds 60` while it is active. The command buffers timing samples in memory and returns the path to a JSON log in the app's Application Support diagnostics directory. It records per-light Bluetooth write duration, connection checks, controller lock waits, timer lateness, total update duration, and backend hue-publication/event-emission timestamps. Lights use numeric indices; device names and identifiers are not logged. Run `python3 scripts/summarize-breathing-trace.py <log-path>` for count, mean, median, p95, p99, minimum, maximum, and standard deviation, plus update-spacing statistics. These measure the app and Bluetooth API, not physical lamp response or browser paint timing. Captures last 5–300 seconds and are limited to 100,000 samples. Control-characteristic metadata is cached for each connection and invalidated when that connection is lost or released. Add `--uncached-characteristic` to compare the previous lookup path during a capture; the cached path resumes when the capture ends or is cancelled. Connection checks, Bluetooth write completion, packet contents, and breathing scheduling are unchanged.
 
-The connection row above every page shows the current Bluetooth link status. Click the **Disconnect** button beside the connection status (also available while connecting) to release all light connections immediately and stop streamed effects without sending a power-off command. The status returns to **Disconnected** when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
+Light connections are released automatically when the hold window expires. Using a light control again reconnects automatically; future scheduled automations still run. Reconnection scans start only when a command needs a disconnected light and stop as soon as all requested lights advertise, with a 1.4-second maximum discovery window instead of a fixed wait. There is no idle scanning or reconnect polling, and this does not extend the configured connection hold time.
 
 While the configured connection window is active, Grindlewald sends the captured `AA 01 … AB` no-op every two seconds. This keeps H6005 links alive beyond their roughly 15-second idle timeout without changing light state.
 

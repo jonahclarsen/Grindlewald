@@ -5,28 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Grindlewald</title>
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="themes/haligonian.css" data-theme-stylesheet />
-    <link rel="stylesheet" href="themes/haligonian-preview.css" />
-    <link rel="stylesheet" href="themes/lumen-preview.css" />
-    <link rel="stylesheet" href="themes/module-preview.css" />
-    <link rel="stylesheet" href="themes/nocturne-preview.css" />
-    <link rel="stylesheet" href="themes/aura-preview.css" />
-    <link rel="stylesheet" href="themes/phosphor-preview.css" />
+    <link rel="stylesheet" href="lumen.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
     <main class="app-shell">
-      <header>
-        <div class="brand-mark" aria-hidden="true">G</div>
-        <div class="brand-copy"><h1>GRINDLEWALD</h1><p>LED lighting control</p></div>
-        <button id="close-button" class="icon-button" aria-label="Hide window"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-      </header>
-
-      <div id="connection-control" class="connection-control">
-        <span class="connection-state" role="status"><span id="connection-dot" aria-hidden="true"></span><span id="connection-label">Checking connection…</span></span>
-        <button id="connection-button" class="connection-button" disabled title="Checking the Bluetooth connection">Disconnect</button>
-      </div>
-
       <section id="controller-page" class="page active">
         <aside id="service-notice" class="service-notice" role="alert" hidden>
           <div><strong id="service-notice-title">Update required</strong><p id="service-notice-message"></p></div>
@@ -149,9 +132,6 @@
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
 
-        <div class="section-heading settings-heading"><div><span class="eyebrow">Look &amp; feel</span><h3>Design</h3></div></div>
-        <p class="page-copy">Same controls, different layout. Saved with your settings.</p>
-        <div id="theme-picker" class="theme-picker" role="group" aria-label="Design"></div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 

@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::Ipv4Addr, sync::Mutex, time::Duration};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -89,9 +89,16 @@ pub(crate) fn matches_saved_network(saved: Option<&str>, current: Option<&str>) 
     }
 }
 
+// Generous limits: these tools can take seconds when the Mac is under heavy CPU load.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
+
+// Hardware ports rarely change, and `networksetup` is by far the slowest step.
+static WIFI_INTERFACES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 async fn command(program: &str, args: &[&str]) -> Result<Option<String>, String> {
     let output = tokio::time::timeout(
-        Duration::from_secs(2),
+        COMMAND_TIMEOUT,
         tokio::process::Command::new(program)
             .args(args)
             .env("LC_ALL", "C")
@@ -124,11 +131,23 @@ async fn connected_router(interface: &str) -> Result<Option<Ipv4Addr>, String> {
     Ok(router_address(&route, interface))
 }
 
-async fn lookup() -> Result<HomeNetworkStatus, String> {
+async fn cached_wifi_interfaces() -> Result<Vec<String>, String> {
+    let cached = WIFI_INTERFACES.lock().unwrap().clone();
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
     let ports = command("/usr/sbin/networksetup", &["-listallhardwareports"])
         .await?
         .ok_or("Could not discover Wi-Fi interfaces.")?;
-    for interface in wifi_interfaces(&ports) {
+    let interfaces = wifi_interfaces(&ports);
+    if !interfaces.is_empty() {
+        *WIFI_INTERFACES.lock().unwrap() = interfaces.clone();
+    }
+    Ok(interfaces)
+}
+
+async fn lookup() -> Result<HomeNetworkStatus, String> {
+    for interface in cached_wifi_interfaces().await? {
         let Some(router) = connected_router(&interface).await? else {
             continue;
         };
@@ -164,7 +183,7 @@ pub async fn home_network_status() -> Result<HomeNetworkStatus, String> {
     if !cfg!(target_os = "macos") {
         return Err("Home network detection is only supported on macOS.".into());
     }
-    tokio::time::timeout(Duration::from_secs(8), lookup())
+    tokio::time::timeout(LOOKUP_TIMEOUT, lookup())
         .await
         .map_err(|_| "Home network lookup timed out. Try again.".to_string())?
 }
