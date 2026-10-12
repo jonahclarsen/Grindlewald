@@ -106,6 +106,7 @@ enum CliCommand {
         light: Option<String>,
     },
     /// Sweep dedicated white LEDs between warm and cool, keeping brightness steady.
+    /// Refused for H6005 lights, which whined during the sweep.
     BreatheWhite {
         /// Seconds for each one-way sweep (5-120, in steps of 5).
         #[arg(long, default_value_t = 30, value_parser = parse_white_sweep)]

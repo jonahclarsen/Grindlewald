@@ -19,6 +19,7 @@ use crate::{
     },
     command::ControlCommand,
     privileged,
+    protocol::DeviceProfile,
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
 };
 
@@ -306,6 +307,7 @@ impl SharedState {
         } = &command
         {
             validate_white_sweep_seconds(*sweep_seconds)?;
+            reject_white_breathing_on_h6005(&self.load_settings()?, device.as_deref())?;
             return self
                 .start_breathing_mode(350, 1, device.clone(), LightMode::White, *sweep_seconds)
                 .await;
@@ -886,6 +888,26 @@ impl SharedState {
     }
 }
 
+// White breathing made the H6005 whine audibly while it swept, so it is off for
+// that profile. It stays on for Classic (H6001) lights until they are tried too.
+fn reject_white_breathing_on_h6005(
+    settings: &Settings,
+    device: Option<&str>,
+) -> Result<(), String> {
+    let h6005 = settings.devices.iter().find(|light| {
+        light.enabled
+            && light.profile == DeviceProfile::H6005
+            && device.is_none_or(|wanted| light.name.eq_ignore_ascii_case(wanted))
+    });
+    match h6005 {
+        Some(light) => Err(format!(
+            "White breathing is disabled on H6005 lights because it made them whine ({})",
+            light.name
+        )),
+        None => Ok(()),
+    }
+}
+
 fn breathing_command(mode: LightMode, position: u16, device: Option<String>) -> ControlCommand {
     if mode == LightMode::White {
         let kelvin = white_kelvin_at_phase(position);
@@ -1018,7 +1040,8 @@ mod tests {
 
     use crate::{
         command::ControlCommand,
-        settings::{LightMode, Settings},
+        protocol::DeviceProfile,
+        settings::{DeviceConfig, LightMode, Settings},
     };
 
     #[tokio::test]
@@ -1373,6 +1396,41 @@ mod tests {
             device: None,
         };
         assert!(select_preset(&mut settings, &power).is_none());
+    }
+
+    #[tokio::test]
+    async fn white_breathing_is_refused_on_h6005_lights() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        let mut settings = Settings::default();
+        for (name, profile) in [
+            ("Lamp", DeviceProfile::H6005),
+            ("Strip", DeviceProfile::Classic),
+        ] {
+            settings.devices.push(DeviceConfig {
+                name: name.into(),
+                identifier: name.into(),
+                profile,
+                enabled: true,
+            });
+        }
+        state.save_settings(&settings).unwrap();
+        for device in [None, Some("lamp".to_string())] {
+            let error = state
+                .execute(ControlCommand::BreatheWhite {
+                    sweep_seconds: 30,
+                    device,
+                })
+                .await
+                .unwrap_err();
+            assert!(error.contains("H6005"), "{error}");
+        }
+        assert!(!state.party_active.load(Ordering::SeqCst));
+        assert!(state.current_breathing().is_none());
+
+        assert!(super::reject_white_breathing_on_h6005(&settings, Some("Strip")).is_ok());
+        settings.devices[0].enabled = false;
+        assert!(super::reject_white_breathing_on_h6005(&settings, None).is_ok());
     }
 
     #[tokio::test]

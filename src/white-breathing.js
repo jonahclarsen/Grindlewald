@@ -37,3 +37,10 @@ export function whiteBreathingPaceCommand(sweepSeconds) {
   const { sweep_seconds } = whiteBreathingCommand(sweepSeconds);
   return { command: "set_white_breathing_pace", sweep_seconds };
 }
+
+// White breathing made the H6005 whine audibly while it swept, so it only appears
+// when every enabled light is Classic (H6001). The backend refuses H6005 too.
+export function whiteBreathingAvailable(devices) {
+  const enabled = devices.filter((device) => device.enabled);
+  return enabled.length > 0 && enabled.every((device) => device.profile !== "h6005");
+}

@@ -1,4 +1,4 @@
-import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand } from "./white-breathing.js";
+import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
@@ -653,6 +653,7 @@ function renderBreathingControls() {
   const sweepLabel = `${settings.whiteBreathingSweepSeconds} s each way`;
   $("#white-breathing-sweep-output").value = sweepLabel;
   $("#white-breathing-sweep").setAttribute("aria-valuetext", sweepLabel);
+  $(".white-breathing-controls").hidden = !whiteBreathingAvailable(settings.devices);
   syncRangeFills();
 }
 

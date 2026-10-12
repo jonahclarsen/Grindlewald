@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand } from "../src/white-breathing.js";
+import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "../src/white-breathing.js";
 
 test("white playback reflects at warm and cool instead of wrapping abruptly", () => {
   assert.equal(whitePlaybackPosition(0), 0);
@@ -32,4 +32,14 @@ test("white pace controls send a one-way sweep duration without color step setti
 test("live white pace updates have no start, stop, or seek action", () => {
   assert.deepEqual(whiteBreathingPaceCommand(45), { command: "set_white_breathing_pace", sweep_seconds: 45 });
   assert.throws(() => whiteBreathingPaceCommand(6));
+});
+
+test("white breathing only appears when every enabled light is Classic (H6001)", () => {
+  const h6001 = { profile: "classic", enabled: true };
+  const h6005 = { profile: "h6005", enabled: true };
+  assert.equal(whiteBreathingAvailable([h6001]), true);
+  assert.equal(whiteBreathingAvailable([h6005]), false);
+  assert.equal(whiteBreathingAvailable([h6001, h6005]), false);
+  assert.equal(whiteBreathingAvailable([h6001, { ...h6005, enabled: false }]), true);
+  assert.equal(whiteBreathingAvailable([]), false);
 });
