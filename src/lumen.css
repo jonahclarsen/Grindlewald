@@ -508,18 +508,13 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
   border-radius: 50%;
   box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .18), 0 0 0 2px var(--tile), 0 0 0 3.5px var(--separator);
 }
-/* Make the light's current mode unmistakable: ring the active module, mute the other's track until it's touched. */
+/* Make the light's current mode unmistakable: ring the active module. */
 .picker-card.color-card, .picker-card.white-card { transition: background-color .2s, box-shadow .2s; }
-.picker-card :is(.picker-track, .temperature-labels) { transition: filter .2s, opacity .2s; }
 :root[data-light-mode="color"] .color-card,
 :root[data-light-mode="white"] .white-card {
   background: color-mix(in srgb, var(--accent) 6%, var(--tile));
   box-shadow: inset 0 0 0 1.25px var(--accent), var(--tile-shadow);
 }
-:root[data-light-mode="white"] .color-card .picker-track,
-:root[data-light-mode="color"] .white-card :is(.picker-track, .temperature-labels) { filter: saturate(.3); opacity: .5; }
-:root[data-light-mode] .picker-card:hover :is(.picker-track, .temperature-labels),
-:root[data-light-mode] .picker-card .picker-track:focus-visible { filter: none; opacity: 1; }
 .picker-track {
   height: 30px;
   margin-top: 12px;
