@@ -511,27 +511,13 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 }
 :root[data-light-mode="color"] #color-swatch,
 :root[data-light-mode="white"] #white-swatch { box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .18), 0 0 0 2px var(--tile), 0 0 0 4px var(--accent); }
-/* Make the light's current mode unmistakable: ring and badge the active module, mute the other's track until it's touched. */
+/* Make the light's current mode unmistakable: ring the active module, mute the other's track until it's touched. */
 .picker-card.color-card, .picker-card.white-card { transition: background-color .2s, box-shadow .2s; }
 .picker-card :is(.picker-track, .temperature-labels) { transition: filter .2s, opacity .2s; }
 :root[data-light-mode="color"] .color-card,
 :root[data-light-mode="white"] .white-card {
   background: color-mix(in srgb, var(--accent) 6%, var(--tile));
-  box-shadow: inset 0 0 0 2px var(--accent), var(--tile-shadow);
-}
-:root[data-light-mode="color"] .color-card .picker-title strong::after,
-:root[data-light-mode="white"] .white-card .picker-title strong::after {
-  content: "Active";
-  display: inline-block;
-  margin-left: 7px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .02em;
-  vertical-align: 1px;
+  box-shadow: inset 0 0 0 1.25px var(--accent), var(--tile-shadow);
 }
 :root[data-light-mode="white"] .color-card .picker-track,
 :root[data-light-mode="color"] .white-card :is(.picker-track, .temperature-labels) { filter: saturate(.3); opacity: .5; }
