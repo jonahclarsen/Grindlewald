@@ -15,7 +15,8 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Configurable BLE connection hold time, making follow-up color changes fast
 - Native H6005 white-temperature packets from 2000–9000 K
 - A locally streamed rainbow party mode with instant H6005 transitions
-- Breathing mode with 1–100 integer RGB color steps and a fixed 250–1,000 ms interval in 50 ms increments; defaults to step 1 and 350 ms
+- Breathing mode with 1–100 integer RGB color steps and a fixed 26–1,000 ms interval; defaults to step 1 and 350 ms
+- Frames to each light are spaced by its measured minimums (26 ms, or 47 ms after switching between color and white on the H6005), so quick follow-up changes are not silently dropped
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -87,11 +88,14 @@ grindlewaldctl stop-party
 
 # Slowly breathe between colors; 1 is the smallest RGB change
 grindlewaldctl breathe --interval-ms 350 --color-step 1
-grindlewaldctl breathe --interval-ms 250 --color-step 10 --light Bedroom
+grindlewaldctl breathe --interval-ms 100 --color-step 10 --light Bedroom
 grindlewaldctl stop-effect
 
 # Breathe between warm and cool white, taking 30 seconds each way
 grindlewaldctl breathe-white --sweep-seconds 30
+
+# Measure one light's minimum step interval and mode-switch spacing (about 20 minutes)
+grindlewaldctl measure-step-interval --light Bedroom
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
 grindlewaldctl experiment '04 08' --light Bedroom
@@ -160,11 +164,19 @@ The H6005 ordinary `0x0D` mode fades between colors, so party mode enters its in
 
 **Color step** is an integer from 1 to 100, defaulting to 1. One step changes one RGB channel by exactly 1 on its 0–255 scale. The wheel contains 1,530 distinct positions in the order red → yellow → green → cyan → blue → magenta. Each update advances exactly the selected number of positions, wrapping around without shortening the step at the end of a lap.
 
-**Step interval** is the time between updates: 250–1,000 milliseconds in increments of 50, defaulting to 350 ms. Every hue uses the same interval, independent of Color step. Brightness stays at the selected level. Slow Bluetooth writes can lengthen the interval; writes remain serialized without accumulating catch-up commands.
+**Step interval** is the time between updates: 26–1,000 whole milliseconds, defaulting to 350 ms. The floor is the measured minimum frame spacing described below. Every hue uses the same interval, independent of Color step. Brightness stays at the selected level. Slow Bluetooth writes can lengthen the interval; writes remain serialized without accumulating catch-up commands.
 
-Older full-cycle settings migrate to their average interval (`cycleSeconds × 1000 / ceil(1530 / colorStep)`), rounded to the nearest 50 ms and clamped to the new range. Older per-step settings are rounded and clamped too. New CLI commands use `--interval-ms` and `--color-step`; `--pace` still accepts seconds within the same bounds and increments. Legacy `--cycle-seconds` commands convert to a supported interval, and `--hue-step` converts degrees to integer RGB steps.
+Older full-cycle settings migrate to their average interval (`cycleSeconds × 1000 / ceil(1530 / colorStep)`), rounded to the nearest 50 ms and clamped to the old 250–1,000 ms range. Older per-step settings are rounded and clamped too. New CLI commands use `--interval-ms` and `--color-step`; `--pace` still accepts seconds within the same bounds, in whole milliseconds. Legacy `--cycle-seconds` commands convert to a supported interval, and `--hue-step` converts degrees to integer RGB steps.
 
 The normal Color hue slider and swatch show the last successfully sent breathing color. Dragging or using its arrow keys seeks within the running effect, applies the latest requested hue after any in-flight write, and continues the fixed-step sequence from there. The selected static color is retained for when breathing stops.
+
+### Minimum frame spacing
+
+Govee lights silently drop frames that arrive too close together. An H6005 that received the reconnect sync (selection and brightness) followed within a few milliseconds by the next queued slider change kept the white mode but lost the new brightness. Grindlewald therefore paces every frame to a light: at least the model's minimum spacing between frames, and its longer mode-switch spacing after a frame that switches between color and white (with twice that between two switches). The slowest model's minimum spacing is also the breathing Step interval floor.
+
+`grindlewaldctl measure-step-interval` (or **Measure H6001** in the Brightness card, shown while an H6001 is enabled) measures both values on one light. Each trial streams 18 dim red-orange frames at a fixed gap, waits, and reads the light's brightness and color back over its status characteristic; it passes only if the final color and brightness both landed. Same-mode trials stream color and brightness frames as breathing does; mode-switch trials alternate color and white. Even well-spaced frames are occasionally lost, so the diagnostic does not wait for a perfect run: starting at 1 ms, every gap gets 10 trials, and the answer is the first gap of ten consecutive gaps with at most two drops among their 100 trials. The limits vary between Bluetooth connections, so it repeats on three fresh connections and reports the worst of each, which takes about 20 minutes, then restores the saved selection.
+
+On an H6005 (October 2026), drops fell from roughly 50% at 10 ms to the background rate at 26 ms for same-mode frames, while frames within 46 ms of a color/white switch were still dropped 5–15% of the time on some connections. The H6001 uses the same values until it is measured; update `DeviceProfile::min_write_spacing_ms` and `mode_switch_spacing_ms` in `src-tauri/src/protocol.rs` if it differs.
 
 White breathing is available in the White card and from `grindlewaldctl breathe-white --sweep-seconds 30`, but only for Classic (H6001) lights. It made an H6005 whine audibly while sweeping, so the button is hidden while any H6005 light is enabled and the backend refuses it for H6005 lights. Whether the H6001 whines too is still untested. Dragging the warmth picker moves the running sweep; changing its pace preserves the current warmth and direction without restarting. Stop restores the saved static white selection.
 

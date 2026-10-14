@@ -553,7 +553,8 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 
 .white-breathing-controls { margin-top: 10px; padding-top: 0; border-top: 0; }
 .white-breathing-controls[hidden] { display: none; }
-.white-breathing-reminder {
+.white-breathing-reminder,
+.future-me-reminder {
   margin: 0 0 8px;
   padding: 10px 12px;
   border: 2px dashed var(--orange);
@@ -563,7 +564,13 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
   font-size: 12px;
   line-height: 1.4;
 }
-.white-breathing-reminder strong { display: block; margin-bottom: 2px; font-size: 13px; font-weight: 700; }
+.white-breathing-reminder strong,
+.future-me-reminder strong { display: block; margin-bottom: 2px; font-size: 13px; font-weight: 700; }
+.future-me-reminder { margin: 10px 0 0; }
+.future-me-reminder[hidden] { display: none; }
+.future-me-reminder p { margin: 0; }
+.future-me-reminder button { margin-top: 8px; }
+.future-me-reminder #step-interval-result { margin-top: 8px; font-weight: 600; }
 #white-breathing-button {
   justify-content: flex-start;
   gap: 9px;

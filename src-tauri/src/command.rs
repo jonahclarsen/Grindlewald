@@ -78,6 +78,10 @@ pub enum ControlCommand {
         payload: String,
         device: Option<String>,
     },
+    // Finds the closest frame spacing one light reliably keeps (src/spacing.rs).
+    MeasureStepInterval {
+        device: Option<String>,
+    },
 }
 
 impl ControlCommand {
@@ -93,7 +97,8 @@ impl ControlCommand {
             | Self::BreatheWhite { device, .. }
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
-            | Self::Experiment { device, .. } => device.as_deref(),
+            | Self::Experiment { device, .. }
+            | Self::MeasureStepInterval { device } => device.as_deref(),
             Self::SetWhiteBreathingPace { .. }
             | Self::TraceBreathing { .. }
             | Self::SeekBreathing { .. }

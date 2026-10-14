@@ -323,6 +323,18 @@ impl SharedState {
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
+        if let ControlCommand::MeasureStepInterval { device } = &command {
+            let result = self
+                .controller
+                .lock()
+                .await
+                .measure_write_spacing(&settings, device.as_deref())
+                .await;
+            if result.as_deref() != Ok(BLUETOOTH_OFF_MESSAGE) {
+                self.arm_idle_disconnect(settings.connection_hold_seconds);
+            }
+            return result;
+        }
         let preset = matches!(command, ControlCommand::Preset { .. });
         let command = resolve_preset(&settings, command)?;
         let result = self

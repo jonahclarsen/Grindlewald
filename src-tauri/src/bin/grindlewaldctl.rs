@@ -87,13 +87,13 @@ enum CliCommand {
     },
     /// Start a slow color-breathing effect.
     Breathe {
-        /// Milliseconds between color steps (250-1000 in increments of 50; default 350).
+        /// Milliseconds between color steps (the lights' measured minimum up to 1000; default 350).
         #[arg(long, conflicts_with_all = ["pace", "cycle_seconds"], value_parser = parse_interval)]
         interval_ms: Option<u32>,
         /// Legacy full-cycle duration, converted to the nearest supported step interval.
         #[arg(long, hide = true, value_parser = clap::value_parser!(u32).range(1..=3600))]
         cycle_seconds: Option<u32>,
-        /// Seconds between steps (0.25-1 in increments of 0.05).
+        /// Seconds between steps, in whole milliseconds, within the same bounds.
         #[arg(long, conflicts_with = "cycle_seconds", value_parser = clap::value_parser!(f32))]
         pace: Option<f32>,
         /// RGB steps along the color wheel per update (1-100); 1 is the smallest change.
@@ -126,6 +126,12 @@ enum CliCommand {
     StopParty,
     /// Stop any running party or breathing effect.
     StopEffect,
+    /// Measure one light's minimum step interval and mode-switch spacing (about 20 minutes).
+    MeasureStepInterval {
+        /// Required when more than one light is enabled.
+        #[arg(short, long)]
+        light: Option<String>,
+    },
     /// Try raw hexadecimal bytes after the safe 33 05 color/mode prefix.
     Experiment {
         payload: String,
@@ -212,6 +218,9 @@ async fn main() -> anyhow::Result<()> {
             payload,
             device: Some(light),
         },
+        CliCommand::MeasureStepInterval { light } => {
+            ControlCommand::MeasureStepInterval { device: light }
+        }
     };
 
     let path = socket_path();
@@ -241,6 +250,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grindlewald_lib::breathing::{MAX_INTERVAL_MS, MIN_INTERVAL_MS};
 
     #[test]
     fn white_breathing_cli_accepts_only_supported_sweep_durations() {
@@ -260,8 +270,8 @@ mod tests {
     }
 
     #[test]
-    fn interval_cli_accepts_only_supported_millisecond_increments() {
-        for interval in (250..=1000).step_by(50) {
+    fn interval_cli_accepts_only_supported_milliseconds() {
+        for interval in [MIN_INTERVAL_MS, 251, 275, 350, MAX_INTERVAL_MS] {
             let cli =
                 Cli::try_parse_from(["ctl", "breathe", "--interval-ms", &interval.to_string()])
                     .unwrap();
@@ -270,7 +280,8 @@ mod tests {
             };
             assert_eq!(interval_ms, Some(interval));
         }
-        for invalid in ["0", "249", "251", "275", "1001", "0.25", "-1"] {
+        let too_fast = (MIN_INTERVAL_MS - 1).to_string();
+        for invalid in ["0", &too_fast, "1001", "0.25", "-1"] {
             assert!(Cli::try_parse_from(["ctl", "breathe", "--interval-ms", invalid]).is_err());
         }
         for legacy in ["--pace", "--cycle-seconds"] {

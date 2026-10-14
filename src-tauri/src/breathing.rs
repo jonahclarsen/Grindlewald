@@ -11,14 +11,21 @@ pub fn default_interval_ms() -> u32 {
     350
 }
 
+// The fastest step every light keeps without dropping frames.
+pub const MIN_INTERVAL_MS: u32 = crate::protocol::DeviceProfile::slowest_write_spacing_ms() as u32;
+pub const MAX_INTERVAL_MS: u32 = 1000;
+
 pub fn frame_interval(interval_ms: u32) -> Result<Duration, String> {
-    if !(250..=1000).contains(&interval_ms) || interval_ms % 50 != 0 {
-        return Err("breathing interval must be 250–1000 milliseconds in increments of 50".into());
+    if !(MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&interval_ms) {
+        return Err(format!(
+            "breathing interval must be {MIN_INTERVAL_MS}–{MAX_INTERVAL_MS} milliseconds"
+        ));
     }
     Ok(Duration::from_millis(u64::from(interval_ms)))
 }
 
-// Used only when migrating old settings or whole-cycle commands.
+// Used only when migrating old settings or whole-cycle commands, which keep
+// their original 250–1000 ms range in 50 ms increments.
 pub fn rounded_interval_ms(milliseconds: f64) -> Result<u32, String> {
     if !milliseconds.is_finite() || milliseconds <= 0.0 {
         return Err("invalid legacy breathing interval".into());
@@ -46,9 +53,14 @@ pub fn resolve_interval_ms(
         let milliseconds = f64::from(pace) * 1000.0;
         if !milliseconds.is_finite()
             || (milliseconds - milliseconds.round()).abs() > 0.001
-            || !(250.0..=1000.0).contains(&milliseconds.round())
+            || !(f64::from(MIN_INTERVAL_MS)..=f64::from(MAX_INTERVAL_MS))
+                .contains(&milliseconds.round())
         {
-            return Err("breathing pace must be 0.25–1 seconds in increments of 0.05".into());
+            return Err(format!(
+                "breathing pace must be {}–{} seconds in whole milliseconds",
+                f64::from(MIN_INTERVAL_MS) / 1000.0,
+                f64::from(MAX_INTERVAL_MS) / 1000.0
+            ));
         }
         milliseconds.round() as u32
     } else if let Some(cycle) = cycle_seconds {
@@ -239,7 +251,7 @@ mod tests {
     #[test]
     fn interval_bounds_and_increments_are_enforced_for_all_commands() {
         for ms in 0..=1100 {
-            let valid = (250..=1000).contains(&ms) && ms % 50 == 0;
+            let valid = (MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&ms);
             assert_eq!(frame_interval(ms).is_ok(), valid);
             assert_eq!(resolve_interval_ms(Some(ms), None, None, 1).is_ok(), valid);
             assert_eq!(
@@ -258,9 +270,17 @@ mod tests {
     }
 
     #[test]
+    fn the_step_interval_slider_matches_the_backend_bounds() {
+        let html = include_str!("../../src/index.html");
+        assert!(html.contains(&format!(
+            r#"id="breathing-interval" type="range" min="{MIN_INTERVAL_MS}" max="{MAX_INTERVAL_MS}" step="1""#
+        )));
+    }
+
+    #[test]
     fn scheduler_uses_the_same_interval_without_catch_up_bursts() {
         let start = tokio::time::Instant::now();
-        for ms in (250..=1000).step_by(50) {
+        for ms in MIN_INTERVAL_MS..=MAX_INTERVAL_MS {
             let interval = frame_interval(ms).unwrap();
             assert_eq!(
                 next_frame_deadline(start, start + Duration::from_millis(20), interval),

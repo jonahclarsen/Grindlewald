@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const CONTROL_CHARACTERISTIC: &str = "00010203-0405-0607-0809-0a0b0c0d2b11";
+pub const NOTIFY_CHARACTERISTIC: &str = "00010203-0405-0607-0809-0a0b0c0d2b10";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -10,12 +11,87 @@ pub enum DeviceProfile {
 }
 
 impl DeviceProfile {
+    // Lights silently drop frames written closer together than this, measured with
+    // `grindlewaldctl measure-step-interval` (src/spacing.rs). The H6001 (Classic)
+    // is assumed to match the H6005 until it is measured.
+    pub const fn min_write_spacing_ms(self) -> u64 {
+        match self {
+            Self::Classic => H6005_MIN_WRITE_SPACING_MS,
+            Self::H6005 => H6005_MIN_WRITE_SPACING_MS,
+        }
+    }
+
+    // Frames sent soon after a switch between color and white are dropped too,
+    // so the frame after a switch waits this long, and the next switch twice this.
+    pub const fn mode_switch_spacing_ms(self) -> u64 {
+        match self {
+            Self::Classic => H6005_MODE_SWITCH_SPACING_MS,
+            Self::H6005 => H6005_MODE_SWITCH_SPACING_MS,
+        }
+    }
+
+    pub const fn mode_switch_spacing(self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.mode_switch_spacing_ms())
+    }
+
+    pub const fn min_write_spacing(self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.min_write_spacing_ms())
+    }
+
+    // Bounds anything shared by every light, such as the breathing step interval.
+    pub const fn slowest_write_spacing_ms() -> u64 {
+        let classic = Self::Classic.min_write_spacing_ms();
+        let h6005 = Self::H6005.min_write_spacing_ms();
+        if classic > h6005 { classic } else { h6005 }
+    }
+
+    pub const fn slowest_write_spacing() -> std::time::Duration {
+        std::time::Duration::from_millis(Self::slowest_write_spacing_ms())
+    }
+
+    pub const fn model_name(self) -> &'static str {
+        match self {
+            Self::Classic => "H6001",
+            Self::H6005 => "H6005",
+        }
+    }
+
     fn manual_mode(self) -> u8 {
         match self {
             Self::Classic => 0x02,
             Self::H6005 => 0x0d,
         }
     }
+}
+
+// Measured on 2026-10-14. Across several connections, drops fell to the background
+// rate (under 1%) from 26 ms between same-mode frames and 47 ms after a switch.
+const H6005_MIN_WRITE_SPACING_MS: u64 = 26;
+const H6005_MODE_SWITCH_SPACING_MS: u64 = 47;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameMode {
+    Color,
+    White,
+    // Scene, music, and party sub-modes, by their 33 05 sub-command byte.
+    Other(u8),
+}
+
+// The light mode a frame selects, or None for frames such as brightness and power.
+pub fn frame_mode(profile: DeviceProfile, frame: &[u8; 20]) -> Option<FrameMode> {
+    if frame[0] != 0x33 || frame[1] != 0x05 {
+        return None;
+    }
+    Some(match (profile, frame[2]) {
+        (DeviceProfile::Classic, 0x02) if frame[3..6] == [0xff; 3] && frame[6] == 0x01 => {
+            FrameMode::White
+        }
+        (DeviceProfile::Classic, 0x02) => FrameMode::Color,
+        // H6005 white frames carry a nonzero Kelvin value after the RGB bytes.
+        (DeviceProfile::H6005, 0x0d) if frame[6..8] != [0, 0] => FrameMode::White,
+        (DeviceProfile::H6005, 0x0d) => FrameMode::Color,
+        (_, mode) => FrameMode::Other(mode),
+    })
 }
 
 const MIN_WHITE_KELVIN: u16 = 2_000;
@@ -95,6 +171,18 @@ pub fn white_frame(profile: DeviceProfile, rgb: [u8; 3], kelvin: Option<u16>) ->
             )
         }
     }
+}
+
+// Asks the light to report a setting on the notify characteristic (0x04 is
+// brightness, 0x05 is the color mode and its RGB value).
+pub fn status_query_frame(kind: u8) -> [u8; 20] {
+    let mut bytes = [0_u8; 20];
+    bytes[0] = 0xaa;
+    bytes[1] = kind;
+    bytes[19] = bytes[..19]
+        .iter()
+        .fold(0_u8, |checksum, byte| checksum ^ byte);
+    bytes
 }
 
 pub fn keep_alive_frame() -> [u8; 20] {
@@ -210,6 +298,32 @@ mod tests {
         assert_eq!(&packet[..5], &[0x33, 0x05, 0x04, 0x08, 0]);
         assert_eq!(packet[19], 0x3a);
         assert!(experimental_mode_frame("04 definitely-not-hex").is_err());
+    }
+
+    #[test]
+    fn frames_are_classified_by_the_mode_they_select() {
+        for profile in [DeviceProfile::Classic, DeviceProfile::H6005] {
+            for rgb in [[0xff, 0xff, 0xff], [0xff, 0x41, 0x00], [0, 0, 0]] {
+                assert_eq!(
+                    frame_mode(profile, &color_frame(profile, rgb)),
+                    Some(FrameMode::Color)
+                );
+                assert_eq!(
+                    frame_mode(profile, &white_frame(profile, rgb, None)),
+                    Some(FrameMode::White)
+                );
+            }
+            assert_eq!(frame_mode(profile, &brightness_frame(0.5).unwrap()), None);
+            assert_eq!(frame_mode(profile, &power_frame(true)), None);
+            assert_eq!(frame_mode(profile, &keep_alive_frame()), None);
+        }
+        assert_eq!(
+            frame_mode(
+                DeviceProfile::H6005,
+                &party_frames(DeviceProfile::H6005, [0xff, 0, 0], true)[0]
+            ),
+            Some(FrameMode::Other(0x05))
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod privileged;
 pub mod protocol;
 mod scheduler;
 pub mod settings;
+pub mod spacing;
 pub mod state;
 mod timing;
 

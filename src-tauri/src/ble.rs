@@ -13,10 +13,12 @@ use uuid::Uuid;
 use crate::{
     command::ControlCommand,
     protocol::{
-        CONTROL_CHARACTERISTIC, brightness_frame, color_frame, experimental_mode_frame,
-        keep_alive_frame, parse_hex_color, party_frames, power_frame, white_frame,
+        CONTROL_CHARACTERISTIC, DeviceProfile, FrameMode, brightness_frame, color_frame,
+        experimental_mode_frame, frame_mode, keep_alive_frame, parse_hex_color, party_frames,
+        power_frame, white_frame,
     },
     settings::{DeviceConfig, LightMode, Settings},
+    spacing::{SEARCH_CEILING_MS, SpacingProbe, TrialKind, find_minimum_spacing},
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -27,6 +29,7 @@ pub struct DiscoveredDevice {
 }
 
 pub const BLUETOOTH_OFF_MESSAGE: &str = "Bluetooth is off; lights unchanged";
+const MEASUREMENT_CONNECTIONS: usize = 3;
 
 pub struct BleController {
     #[cfg(test)]
@@ -36,6 +39,7 @@ pub struct BleController {
     connections: HashMap<String, Peripheral>,
     light_states: HashMap<String, LightState>,
     control_characteristics: HashMap<String, Characteristic>,
+    pacing: HashMap<String, Pacing>,
 }
 
 impl Default for BleController {
@@ -54,6 +58,7 @@ impl BleController {
             connections: HashMap::new(),
             light_states: HashMap::new(),
             control_characteristics: HashMap::new(),
+            pacing: HashMap::new(),
         }
     }
 
@@ -172,6 +177,8 @@ impl BleController {
             let mut next_state = self.light_states.get(&key).cloned().unwrap_or_default();
             let preparation_started = std::time::Instant::now();
             let frames = next_state.frames(settings, command, device.profile);
+            let profile = device.profile;
+            let mut pacing = self.pacing.get(&key).copied().unwrap_or_default();
             let characteristic = if cached {
                 self.control_characteristics.get(&key).cloned()
             } else {
@@ -199,33 +206,47 @@ impl BleController {
                 );
             }
             async move {
-                let characteristic = characteristic.ok_or_else(|| {
-                    format!(
-                        "{} does not expose the Govee control characteristic",
-                        device.name
-                    )
-                })?;
-
-                for frame in frames? {
-                    let started = std::time::Instant::now();
-                    let result = peripheral
-                        .write(&characteristic, &frame, WriteType::WithoutResponse)
-                        .await;
-                    if breathing {
-                        crate::timing::record("write", started, Some(light + 1), result.is_ok());
+                let result = async {
+                    let characteristic = characteristic.ok_or_else(|| {
+                        format!(
+                            "{} does not expose the Govee control characteristic",
+                            device.name
+                        )
+                    })?;
+                    for frame in frames? {
+                        let mode = frame_mode(profile, &frame);
+                        if let Some(ready) = pacing.ready_at(profile, mode) {
+                            tokio::time::sleep_until(ready).await;
+                        }
+                        let started = std::time::Instant::now();
+                        pacing.wrote(profile, mode, tokio::time::Instant::now());
+                        let result = peripheral
+                            .write(&characteristic, &frame, WriteType::WithoutResponse)
+                            .await;
+                        if breathing {
+                            crate::timing::record(
+                                "write",
+                                started,
+                                Some(light + 1),
+                                result.is_ok(),
+                            );
+                        }
+                        result.map_err(|error| format!("{}: {error}", device.name))?;
                     }
-                    result.map_err(|error| format!("{}: {error}", device.name))?;
+                    Ok::<_, String>((device.name.clone(), next_state))
                 }
-                Ok::<_, String>((device.name.clone(), key, next_state))
+                .await;
+                (key, pacing, result)
             }
         });
 
         let results = join_all(writes).await;
         let mut changed = Vec::new();
         let mut errors = Vec::new();
-        for result in results {
+        for (key, pacing, result) in results {
+            self.pacing.insert(key.clone(), pacing);
             match result {
-                Ok((name, key, state)) => {
+                Ok((name, state)) => {
                     self.light_states.insert(key, state);
                     changed.push(name);
                 }
@@ -237,6 +258,132 @@ impl BleController {
         } else {
             Err(errors.join("; "))
         }
+    }
+
+    // Runs the spacing diagnostic on one light, then restores the UI's selection.
+    pub async fn measure_write_spacing(
+        &mut self,
+        settings: &Settings,
+        device: Option<&str>,
+    ) -> Result<String, String> {
+        if self.bluetooth_powered_off().await? {
+            return Ok(BLUETOOTH_OFF_MESSAGE.into());
+        }
+        let selected: Vec<DeviceConfig> = settings
+            .devices
+            .iter()
+            .filter(|candidate| candidate.enabled)
+            .filter(|candidate| {
+                device.is_none_or(|wanted| candidate.name.eq_ignore_ascii_case(wanted))
+            })
+            .cloned()
+            .collect();
+        let [device] = selected.as_slice() else {
+            return Err(match device {
+                Some(name) => format!("no enabled device named {name:?}"),
+                None => "Choose one light to measure".into(),
+            });
+        };
+        // The limits change from one Bluetooth connection to the next, so measure
+        // on several fresh connections and keep the worst.
+        let key = normalize(&device.identifier);
+        let mut rounds = Vec::new();
+        let mut measured = Ok(());
+        for round in 0..MEASUREMENT_CONNECTIONS {
+            if round > 0 {
+                if let Some(peripheral) = self.connections.get(&key) {
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(3), peripheral.disconnect()).await;
+                }
+                self.forget_connection(&key);
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+            match self.measure_one_connection(device).await {
+                Ok(result) => rounds.push(result),
+                Err(error) => {
+                    measured = Err(error);
+                    break;
+                }
+            }
+        }
+        // The light's mode is unknown after the trials, so the restore below
+        // counts as a mode switch.
+        self.pacing.insert(
+            key.clone(),
+            Pacing::after_unknown_mode(
+                tokio::time::Instant::now() + Duration::from_millis(SEARCH_CEILING_MS),
+            ),
+        );
+        self.light_states.entry(key).or_default().needs_sync = true;
+        let restored = self
+            .apply(
+                settings,
+                &ControlCommand::Brightness {
+                    value: settings.brightness,
+                    device: Some(device.name.clone()),
+                },
+            )
+            .await;
+        measured.map_err(|error| format!("{}: {error}", device.name))?;
+        restored?;
+        let same_mode = rounds
+            .iter()
+            .map(|(same_mode, _)| *same_mode)
+            .max()
+            .unwrap_or(0);
+        let mode_switch = rounds.iter().map(|(_, switch)| *switch).max().unwrap_or(0);
+        let each = rounds
+            .iter()
+            .map(|(same_mode, switch)| format!("{same_mode}/{switch}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let profile = device.profile;
+        let model = profile.model_name();
+        Ok(format!(
+            "{} ({model}): minimum step interval {same_mode} ms, and {mode_switch} ms after switching between color and white (worst of {} connections: {each} ms). {model} lights are currently set to {} ms and {} ms.",
+            device.name,
+            rounds.len(),
+            profile.min_write_spacing_ms(),
+            profile.mode_switch_spacing_ms()
+        ))
+    }
+
+    // Returns the same-mode and mode-switch spacing measured on one connection.
+    async fn measure_one_connection(
+        &mut self,
+        device: &DeviceConfig,
+    ) -> Result<(u64, u64), String> {
+        self.ensure_connected(std::slice::from_ref(device)).await?;
+        let key = normalize(&device.identifier);
+        let peripheral = self.connections[&key].clone();
+        let characteristic_uuid = Uuid::parse_str(CONTROL_CHARACTERISTIC)
+            .map_err(|error| format!("invalid control UUID: {error}"))?;
+        let control = peripheral
+            .characteristics()
+            .into_iter()
+            .find(|characteristic| characteristic.uuid == characteristic_uuid)
+            .ok_or_else(|| {
+                format!(
+                    "{} does not expose the Govee control characteristic",
+                    device.name
+                )
+            })?;
+        if let Some(ready) = self
+            .pacing
+            .get(&key)
+            .and_then(|pacing| pacing.ready_at(device.profile, Some(FrameMode::Other(0))))
+        {
+            tokio::time::sleep_until(ready).await;
+        }
+        let mut probe = SpacingProbe::start(&peripheral, control, device.profile).await?;
+        let same_mode = find_minimum_spacing(&mut probe).await;
+        probe.set_kind(TrialKind::ModeSwitch);
+        let mode_switch = match same_mode {
+            Ok(_) => find_minimum_spacing(&mut probe).await,
+            Err(_) => Err(String::new()),
+        };
+        probe.finish().await;
+        Ok((same_mode?, mode_switch?))
     }
 
     async fn ensure_connected(&mut self, devices: &[DeviceConfig]) -> Result<(), String> {
@@ -409,6 +556,7 @@ impl BleController {
     fn forget_connection(&mut self, identifier: &str) {
         self.connections.remove(identifier);
         self.control_characteristics.remove(identifier);
+        self.pacing.remove(identifier);
         self.light_states
             .entry(identifier.to_owned())
             .or_default()
@@ -423,7 +571,7 @@ impl BleController {
             return;
         };
         let frame = keep_alive_frame();
-        for peripheral in self.connections.values() {
+        for (identifier, peripheral) in &self.connections {
             if !peripheral.is_connected().await.unwrap_or(false) {
                 continue;
             }
@@ -432,11 +580,80 @@ impl BleController {
                 .into_iter()
                 .find(|characteristic| characteristic.uuid == characteristic_uuid)
             {
+                let pacing = self.pacing.entry(identifier.clone()).or_default();
+                if let Some(ready) = pacing.ready_at(DeviceProfile::H6005, None) {
+                    tokio::time::sleep_until(ready).await;
+                }
+                pacing.keep_alive_written(tokio::time::Instant::now());
                 let _ = peripheral
                     .write(&characteristic, &frame, WriteType::WithoutResponse)
                     .await;
             }
         }
+    }
+}
+
+// Lights drop frames that follow each other too closely, and drop more for a
+// while after switching between color and white (see DeviceProfile spacing).
+// An unknown mode, such as right after connecting, counts as a switch.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Pacing {
+    next_write: Option<tokio::time::Instant>,
+    mode: Option<FrameMode>,
+    last_switch: Option<tokio::time::Instant>,
+}
+
+impl Pacing {
+    fn after_unknown_mode(next_write: tokio::time::Instant) -> Self {
+        Self {
+            next_write: Some(next_write),
+            ..Self::default()
+        }
+    }
+
+    fn switches(&self, mode: Option<FrameMode>) -> bool {
+        mode.is_some() && mode != self.mode
+    }
+
+    fn ready_at(
+        &self,
+        profile: crate::protocol::DeviceProfile,
+        mode: Option<FrameMode>,
+    ) -> Option<tokio::time::Instant> {
+        let after_switch = self
+            .last_switch
+            .filter(|_| self.switches(mode))
+            .map(|switched| switched + profile.mode_switch_spacing() * 2);
+        self.next_write.max(after_switch)
+    }
+
+    fn wrote(
+        &mut self,
+        profile: crate::protocol::DeviceProfile,
+        mode: Option<FrameMode>,
+        at: tokio::time::Instant,
+    ) {
+        let switched = self.switches(mode);
+        self.next_write = Some(
+            at + if switched {
+                profile.mode_switch_spacing()
+            } else {
+                profile.min_write_spacing()
+            },
+        );
+        if switched {
+            self.mode = mode;
+            self.last_switch = Some(at);
+        }
+    }
+
+    // Keep-alive frames carry no mode, so the strictest spacing is assumed.
+    fn keep_alive_written(&mut self, at: tokio::time::Instant) {
+        let spacing = crate::protocol::DeviceProfile::slowest_write_spacing();
+        self.next_write = Some(
+            self.next_write
+                .map_or(at + spacing, |next| next.max(at + spacing)),
+        );
     }
 }
 
@@ -600,7 +817,8 @@ fn frames_for(
         | ControlCommand::SeekBreathing { .. }
         | ControlCommand::TraceBreathing { .. }
         | ControlCommand::StopParty
-        | ControlCommand::StopEffect => {
+        | ControlCommand::StopEffect
+        | ControlCommand::MeasureStepInterval { .. } => {
             Err("effect commands must be resolved before reaching Bluetooth".into())
         }
         ControlCommand::PartyFrame { value, enter, .. } => {
@@ -1011,6 +1229,52 @@ mod tests {
                 .contains_key("TEST-LIGHT-2")
         );
         assert!(!controller.light_states["TEST-LIGHT-2"].needs_sync);
+    }
+
+    #[test]
+    fn pacing_waits_longer_after_switching_between_color_and_white() {
+        let profile = DeviceProfile::H6005;
+        let base = profile.min_write_spacing();
+        let switch = profile.mode_switch_spacing();
+        let start = tokio::time::Instant::now();
+        let mut pacing = Pacing::default();
+        let color = Some(FrameMode::Color);
+        let white = Some(FrameMode::White);
+
+        // The mode is unknown after connecting, so the first color frame is a switch.
+        assert_eq!(pacing.ready_at(profile, color), None);
+        pacing.wrote(profile, color, start);
+        assert_eq!(pacing.ready_at(profile, None), Some(start + switch));
+        // Switching straight back waits twice the switch spacing after the last switch.
+        assert_eq!(pacing.ready_at(profile, white), Some(start + switch * 2));
+
+        // Frames in the same mode, and brightness, only need the base spacing.
+        let at = start + switch;
+        pacing.wrote(profile, None, at);
+        assert_eq!(pacing.ready_at(profile, color), Some(at + base));
+        pacing.wrote(profile, color, at + base);
+        assert_eq!(pacing.ready_at(profile, None), Some(at + base * 2));
+
+        // Later, a switch only needs the switch spacing to have passed since the last one.
+        let later = start + Duration::from_secs(1);
+        pacing.wrote(profile, None, later);
+        assert_eq!(pacing.ready_at(profile, white), Some(later + base));
+        pacing.wrote(profile, white, later + base);
+        assert_eq!(pacing.mode, white);
+        assert_eq!(pacing.ready_at(profile, None), Some(later + base + switch));
+    }
+
+    #[test]
+    fn keep_alive_never_shortens_pending_spacing() {
+        let start = tokio::time::Instant::now();
+        let mut pacing = Pacing::after_unknown_mode(start + Duration::from_secs(1));
+        pacing.keep_alive_written(start);
+        assert_eq!(pacing.next_write, Some(start + Duration::from_secs(1)));
+        pacing.keep_alive_written(start + Duration::from_secs(2));
+        assert_eq!(
+            pacing.next_write,
+            Some(start + Duration::from_secs(2) + DeviceProfile::slowest_write_spacing())
+        );
     }
 
     #[test]

@@ -409,6 +409,7 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::breathing::{MAX_INTERVAL_MS, MIN_INTERVAL_MS};
 
     #[test]
     fn settings_saved_with_a_retired_design_choice_still_load() {
@@ -561,12 +562,12 @@ mod tests {
         let mut settings = Settings::default();
         for step in 1..=100 {
             settings.breathing_color_step = step;
-            for interval in (250..=1000).step_by(50) {
+            for interval in [MIN_INTERVAL_MS, 251, 350, 999, MAX_INTERVAL_MS] {
                 settings.breathing_interval_ms = interval;
                 assert!(settings.validate().is_ok());
             }
         }
-        for interval in [0, 249, 251, 999, 1001] {
+        for interval in [0, MIN_INTERVAL_MS - 1, MAX_INTERVAL_MS + 1] {
             settings.breathing_interval_ms = interval;
             assert!(settings.validate().is_err());
         }
@@ -579,7 +580,7 @@ mod tests {
         let path = directory.path().join("settings.json");
         fs::write(
             &path,
-            r#"{"breathingDefaultsVersion":3,"breathingIntervalMs":275}"#,
+            r#"{"breathingDefaultsVersion":3,"breathingIntervalMs":1001}"#,
         )
         .unwrap();
         assert!(load(&path).is_err());

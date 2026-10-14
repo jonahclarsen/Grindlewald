@@ -57,7 +57,12 @@
             <button id="party-button" class="effect-button" aria-pressed="false">Party</button>
             <button id="breathing-button" class="effect-button" aria-pressed="false">Breathe</button>
           </div>
-          <label class="pace-control"><span>Step interval</span><input id="breathing-interval" type="range" min="250" max="1000" step="50" value="350"><output id="breathing-interval-output">350 ms</output></label>
+          <label class="pace-control"><span>Step interval</span><input id="breathing-interval" type="range" min="26" max="1000" step="1" value="350"><output id="breathing-interval-output">350 ms</output></label>
+          <div id="step-interval-reminder" class="future-me-reminder" hidden>
+            <p><strong>Note to future me: measure the H6001's step interval.</strong> It's assumed to keep frames as closely spaced as the H6005. Measuring takes about 20 minutes and flickers the light in dim orange.</p>
+            <button id="measure-step-interval" class="secondary">Measure H6001</button>
+            <p id="step-interval-result" role="status" hidden></p>
+          </div>
           <label class="pace-control"><span>Color step</span><input id="breathing-color-step" type="range" min="1" max="100" step="1" value="1"><output id="breathing-color-step-output">1</output></label>
         </div>
 

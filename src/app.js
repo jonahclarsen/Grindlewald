@@ -1,3 +1,4 @@
+import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
 import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
@@ -644,6 +645,7 @@ function renderBreathingControls() {
   $("#white-breathing-sweep-output").value = sweepLabel;
   $("#white-breathing-sweep").setAttribute("aria-valuetext", sweepLabel);
   $(".white-breathing-controls").hidden = !whiteBreathingAvailable(settings.devices);
+  $("#step-interval-reminder").hidden = lightsToMeasure(settings.devices).length === 0;
   syncRangeFills();
 }
 
@@ -1052,6 +1054,26 @@ $("#white-breathing-sweep").addEventListener("change", async () => {
     }
   }
 });
+$("#measure-step-interval").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const result = $("#step-interval-result");
+  button.disabled = true;
+  button.textContent = "Measuring…";
+  result.hidden = true;
+  const messages = [];
+  for (const device of lightsToMeasure(settings.devices)) {
+    try {
+      messages.push(await call("execute_control", { command: measureStepIntervalCommand(device) }));
+    } catch (error) {
+      messages.push(String(error));
+    }
+  }
+  result.textContent = messages.join(" ");
+  result.hidden = false;
+  button.disabled = false;
+  button.textContent = "Measure H6001";
+});
+
 $("#breathing-interval").addEventListener("input", (event) => {
   settings.breathingIntervalMs = Number(event.target.value);
   renderBreathingControls();
