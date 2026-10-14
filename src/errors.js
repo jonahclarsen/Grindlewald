@@ -11,6 +11,7 @@ export function summarizeError(message) {
 }
 
 export function createErrorPanel(invoke) {
+  const open = document.querySelector("#error-open");
   const panel = document.querySelector("#error-panel");
   const details = document.querySelector("#error-details");
   const toggle = document.querySelector("#error-toggle");
@@ -23,6 +24,24 @@ export function createErrorPanel(invoke) {
     details.scrollTop = details.scrollHeight;
   });
 
+  const close = () => {
+    panel.hidden = true;
+    open.setAttribute("aria-expanded", "false");
+  };
+  open.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    open.setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) scrollToEnd();
+  });
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      open.focus();
+    }
+  });
+
   toggle.addEventListener("click", () => {
     const expanded = toggle.getAttribute("aria-expanded") !== "true";
     toggle.setAttribute("aria-expanded", String(expanded));
@@ -32,8 +51,8 @@ export function createErrorPanel(invoke) {
   });
 
   document.querySelector("#error-dismiss").addEventListener("click", () => {
-    panel.hidden = true;
-    revision += 1;
+    close();
+    open.focus();
   });
 
   copy.addEventListener("click", async () => {
@@ -59,16 +78,36 @@ export function createErrorPanel(invoke) {
   });
 
   return (message) => {
+    if (fullMessage === String(message)) return;
     revision += 1;
     fullMessage = String(message);
     document.querySelector("#error-summary").textContent = summarizeError(fullMessage);
     details.textContent = fullMessage;
     copyLabel.textContent = "Copy error";
     copy.disabled = false;
-    panel.classList.remove("expanded");
-    toggle.setAttribute("aria-expanded", "false");
-    document.querySelector("#error-toggle-label").textContent = "Show details";
-    panel.hidden = false;
-    scrollToEnd();
+    open.hidden = false;
+    if (!panel.hidden) scrollToEnd();
+  };
+}
+
+// Keep a failure steady while commands retry or settings save in the background.
+export function createStatusReporter({ render, recordError, schedule = setTimeout, cancel = clearTimeout }) {
+  let timer = null;
+  let failed = false;
+  return (message, kind = "ready") => {
+    if (failed && (kind === "busy" || message === "Saved")) return;
+    cancel(timer);
+    timer = null;
+    if (kind === "error") {
+      failed = true;
+      render(summarizeError(message), kind);
+      recordError(message);
+    } else {
+      timer = schedule(() => {
+        timer = null;
+        failed = false;
+        render(message, kind);
+      }, 200);
+    }
   };
 }

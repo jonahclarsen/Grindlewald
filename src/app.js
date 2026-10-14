@@ -2,7 +2,7 @@ import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhas
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
-import { createErrorPanel, summarizeError } from "./errors.js";
+import { createErrorPanel, createStatusReporter, summarizeError } from "./errors.js";
 import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
@@ -213,24 +213,14 @@ function makeDraggable(track, update) {
   });
 }
 
-let statusTimer = null;
-
-function setStatus(message, kind = "ready") {
-  clearTimeout(statusTimer);
-  statusTimer = null;
-  const renderStatus = () => {
-    statusTimer = null;
-    $("#status").textContent = kind === "error" ? summarizeError(message) : message;
+const setStatus = createStatusReporter({
+  render(message, kind) {
+    if ($("#status").textContent !== message) $("#status").textContent = message;
+    $("#status").title = message;
     $("#status-dot").className = kind === "ready" ? "" : kind;
-  };
-  if (kind === "error") {
-    renderStatus();
-    showError(message);
-  } else {
-    // Coalesce quick progress, save, and update messages into the latest status.
-    statusTimer = setTimeout(renderStatus, 200);
-  }
-}
+  },
+  recordError: showError,
+});
 
 function setDiscoveryBusy(isBusy) {
   const button = $("#discover-button");

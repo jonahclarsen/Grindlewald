@@ -255,7 +255,7 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 }
 
 /* ---------- Control page: a Control Center module grid ---------- */
-#controller-page { padding-bottom: 46px; }
+.page { padding-bottom: 46px; }
 #controller-page.active {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -302,8 +302,23 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 #status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #status-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: none; }
 #status-dot.busy { background: var(--orange); box-shadow: none; }
-#status-dot.error { background: var(--red); box-shadow: none; }
-#status-dot.error + #status { color: var(--red); }
+#status-dot.error { background: var(--orange); box-shadow: none; }
+.status-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 400;
+}
+.status-details:hover { background: var(--fill); color: var(--label); }
+.status-details .ui-icon { width: 12px; height: 12px; }
 
 /* Shared tile surface */
 .floodlight-card, .picker-card, .control-card [data-power], .control-card .effect-button,
@@ -1060,13 +1075,13 @@ input[data-device-field="enabled"],
 }
 .danger-link:hover { background: var(--tile-hover); }
 
-/* ---------- Error panel: a floating notification ---------- */
+/* ---------- Error details: opened explicitly from the status bar ---------- */
 .error-panel {
   position: absolute;
   z-index: 20;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: 40px;
   padding: 12px 12px 12px 14px;
   border: 0;
   border-radius: 16px;
@@ -1074,7 +1089,6 @@ input[data-device-field="enabled"],
   color: var(--label);
   box-shadow: 0 0 0 .5px var(--shell-edge), 0 12px 32px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .08);
 }
-.app-shell:has(#controller-page.active) .error-panel { bottom: 40px; }
 .error-heading { display: flex; align-items: center; gap: 9px; color: var(--label); }
 .error-heading strong { font-size: 13px; font-weight: 600; }
 .error-heading::before {

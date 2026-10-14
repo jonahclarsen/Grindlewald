@@ -16,8 +16,6 @@
           <button id="service-notice-action" class="primary compact">Update now</button>
         </aside>
 
-        <div class="controller-status eyebrow" role="status"><span id="status-dot" aria-hidden="true"></span><span id="status">Ready</span></div>
-
         <div class="floodlight-card">
           <span class="floodlight-title"><svg class="mode-icon ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><strong>Floodlights</strong></span>
           <div class="floodlight-actions" role="group" aria-label="Floodlights">
@@ -136,12 +134,17 @@
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 
+      <div class="controller-status eyebrow">
+        <span id="status-dot" aria-hidden="true"></span><span id="status" role="status">Ready</span>
+        <button id="error-open" class="status-details" aria-label="View error details" aria-expanded="false" aria-controls="error-panel" hidden><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v2"/></svg><span>Details</span></button>
+      </div>
+
       <aside id="error-panel" class="error-panel" aria-label="Error details" hidden>
         <div class="error-heading">
           <strong>Something went wrong</strong>
           <button id="error-dismiss" class="icon-button" aria-label="Dismiss error"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </div>
-        <p id="error-summary" role="alert"></p>
+        <p id="error-summary"></p>
         <pre id="error-details" tabindex="0" aria-label="Full error, scrolled to the end"></pre>
         <div class="error-actions">
           <button id="error-toggle" class="secondary compact" aria-expanded="false" aria-controls="error-details"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><span id="error-toggle-label">Show details</span></button>
