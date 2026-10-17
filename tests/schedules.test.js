@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "../src/schedules.js";
+import { defaultRunOnUseAfter, disableScheduleFor, isScheduleEnabled, runOnUseError, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "../src/schedules.js";
 
 test("every duration pauses for exactly N × 24 hours and resumes at the deadline", () => {
   // Crosses the autumn daylight-saving transition in America/Vancouver.
@@ -50,4 +50,16 @@ test("explicit empty selections leave lights alone while legacy selections retai
   assert.equal(usesAllLights({ lights: ["Lamp"] }), false);
   assert.equal(usesAllLights({ allLights: false, lights: [] }), false);
   assert.equal(usesAllLights({ allLights: true, lights: [] }), true);
+});
+
+test("the computer-use time must be earlier than the daily time while enabled", () => {
+  assert.equal(runOnUseError({ runOnUse: true, time: "08:00", runOnUseAfter: "06:00" }), "");
+  assert.match(runOnUseError({ runOnUse: true, time: "08:00", runOnUseAfter: "08:00" }), /can’t be later/);
+  assert.match(runOnUseError({ runOnUse: true, time: "08:00", runOnUseAfter: "09:30" }), /can’t be later/);
+  assert.equal(runOnUseError({ runOnUse: false, time: "08:00", runOnUseAfter: "09:30" }), "");
+});
+
+test("the computer-use time defaults to an hour earlier without crossing midnight", () => {
+  assert.equal(defaultRunOnUseAfter("08:15"), "07:15");
+  assert.equal(defaultRunOnUseAfter("00:30"), "00:00");
 });

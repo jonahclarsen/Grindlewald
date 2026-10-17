@@ -69,6 +69,12 @@ pub struct Schedule {
     pub name: String,
     /// Local wall-clock time in 24-hour HH:MM form.
     pub time: String,
+    /// Also run, at most once a day, as soon as the Mac is used between
+    /// `run_on_use_after` (HH:MM, earlier than `time`) and `time`.
+    #[serde(default)]
+    pub run_on_use: bool,
+    #[serde(default)]
+    pub run_on_use_after: String,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     /// Temporary override of `enabled`, as Unix epoch milliseconds. Expiry needs no write.
@@ -630,6 +636,8 @@ mod tests {
                 id: "test".into(),
                 name: "Test".into(),
                 time: "12:00".into(),
+                run_on_use: false,
+                run_on_use_after: String::new(),
                 enabled: true,
                 disabled_until: None,
                 lights: vec!["Re-added lamp".into(), "Original lamp".into()],

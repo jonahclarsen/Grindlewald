@@ -29,3 +29,15 @@ export function sortedScheduleEntries(schedules) {
 export function usesAllLights(schedule) {
   return schedule.allLights ?? schedule.lights.length === 0;
 }
+
+// The run-on-use window ends at the daily time, so it must start strictly before it.
+export function runOnUseError(schedule) {
+  if (!schedule.runOnUse || schedule.runOnUseAfter < schedule.time) return "";
+  return "The computer-use time can’t be later than the daily time.";
+}
+
+export function defaultRunOnUseAfter(time) {
+  const [hours, minutes] = time.split(":").map(Number);
+  const start = Math.max(0, hours * 60 + minutes - 60);
+  return `${String(Math.floor(start / 60)).padStart(2, "0")}:${String(start % 60).padStart(2, "0")}`;
+}

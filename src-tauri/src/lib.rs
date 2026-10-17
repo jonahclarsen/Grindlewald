@@ -1,3 +1,4 @@
+mod activity;
 mod appearance;
 pub mod ble;
 pub mod breathing;

@@ -4,7 +4,7 @@ import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { createErrorPanel, createStatusReporter, summarizeError } from "./errors.js";
-import { disableScheduleFor, isScheduleEnabled, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
+import { defaultRunOnUseAfter, disableScheduleFor, isScheduleEnabled, runOnUseError, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const demoMode = !invoke;
@@ -472,6 +472,11 @@ function renderPresets() {
   syncRangeFills();
 }
 
+function clockTime(value) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 function renderSchedules() {
   settings.schedules.forEach((schedule) => { schedule.allLights = usesAllLights(schedule); });
   const presetOptions = '<option value="">No preset</option>' + settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
@@ -480,9 +485,8 @@ function renderSchedules() {
     const enabled = isScheduleEnabled(schedule);
     const pauseLabel = schedulePauseLabel(schedule);
     if (!automationEditors.expandedIds.has(schedule.id)) {
-      const [hours, minutes] = schedule.time.split(":").map(Number);
-      const time = new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" data-enabled="${enabled}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small class="schedule-when">Every day at <time class="schedule-time" datetime="${escapeHtml(schedule.time)}">${escapeHtml(time)}</time></small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+      const runOnUse = schedule.runOnUse ? ` · or once used after ${clockTime(schedule.runOnUseAfter)}` : "";
+      return `<button class="compact-editor-card schedule-summary" data-expand-schedule="${escapeHtml(schedule.id)}" data-enabled="${enabled}" aria-expanded="false"><span class="summary-copy"><strong>${escapeHtml(schedule.name || "Untitled automation")}</strong><small class="schedule-when" data-run-on-use="${escapeHtml(runOnUse)}">Every day at <time class="schedule-time" datetime="${escapeHtml(schedule.time)}">${escapeHtml(clockTime(schedule.time))}</time>${escapeHtml(runOnUse)}</small><small data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     const floodlightAction = schedule.floodlights || "unchanged";
     const systemAppearance = schedule.systemAppearance || "unchanged";
@@ -524,6 +528,7 @@ function renderSchedules() {
       <div class="field-grid">
         <small class="field full schedule-pause-status" data-schedule-pause-status="${index}" ${pauseLabel ? "" : "hidden"}>${escapeHtml(pauseLabel)}</small>
         <label class="field">Every day at<input type="time" data-schedule-field="time" value="${escapeHtml(schedule.time)}"></label>
+        <div class="field run-on-use"><label><input type="checkbox" data-schedule-field="runOnUse" ${schedule.runOnUse ? "checked" : ""}>or once the computer is used after</label><input type="time" data-schedule-field="runOnUseAfter" aria-label="Computer used after" value="${escapeHtml(schedule.runOnUseAfter || defaultRunOnUseAfter(schedule.time))}" ${schedule.runOnUse ? "" : "disabled"}><small data-run-on-use-error role="alert" hidden></small></div>
         <label class="field">Preset<select data-schedule-field="preset">${presetOptions.replace(`value="${escapeHtml(schedule.preset)}"`, `value="${escapeHtml(schedule.preset)}" selected`)}</select></label>
         <div class="field full">Lights <span class="check-row"><label class="check-pill"><input type="checkbox" data-schedule-field="allLights" ${allLights ? "checked" : ""}>All lights</label>${settings.devices.map((device) => `<label class="check-pill"><input type="checkbox" data-schedule-light="${escapeHtml(device.name)}" ${!allLights && schedule.lights.includes(device.name) ? "checked" : ""}>${escapeHtml(device.name)}</label>`).join("") || "No lights configured"}</span><small>${!schedule.preset || (!allLights && !schedule.lights.length) ? "This preset will not change the lights." : allLights ? "This preset will change all enabled lights." : "This preset will change the selected lights."}</small></div>
         <div class="field full">Floodlights <span class="radio-row" role="radiogroup" aria-label="Floodlights"><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on_home_network" data-floodlight-network ${floodlightAction === "on_home_network" ? "checked" : ""}><span>Turn on if on home network</span></label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="on" data-schedule-field="floodlights" ${floodlightAction === "on" ? "checked" : ""}>Turn on</label><label class="radio-pill"><input type="radio" name="floodlights-${escapeHtml(schedule.id)}" value="off" data-schedule-field="floodlights" ${floodlightAction === "off" ? "checked" : ""}>Turn off</label></span><small data-network-help>${escapeHtml(homeNetworkMessage(schedule, currentHomeNetwork, currentNetworkState))}</small></div>
@@ -943,6 +948,7 @@ document.addEventListener("change", async (event) => {
       schedule[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
       if (field === "enabled") schedule.disabledUntil = null;
       if (field === "allLights") schedule.lights = [];
+      if (field === "runOnUse" && schedule.runOnUse) schedule.runOnUseAfter = scheduleCard.querySelector('[data-schedule-field="runOnUseAfter"]').value;
       if (field === "floodlights") {
         networkSelections.delete(schedule.id);
         schedule.floodlightNetwork = null;
@@ -954,8 +960,14 @@ document.addEventListener("change", async (event) => {
       const light = event.target.dataset.scheduleLight;
       schedule.lights = event.target.checked ? [...new Set([...schedule.lights, light])] : schedule.lights.filter((name) => name !== light);
     }
-    if (!await save()) Object.assign(schedule, previous);
+    const useError = runOnUseError(schedule);
+    if (useError || !await save()) Object.assign(schedule, previous);
     renderSchedules();
+    if (useError) {
+      const message = $(`[data-schedule-index="${scheduleCard.dataset.scheduleIndex}"] [data-run-on-use-error]`);
+      message.textContent = useError;
+      message.hidden = false;
+    }
   }
   const deviceCard = event.target.closest("[data-device-index]");
   if (deviceCard && event.target.dataset.deviceField) {
@@ -1118,7 +1130,7 @@ $("#add-preset").addEventListener("click", async () => {
 });
 $("#add-schedule").addEventListener("click", async () => {
   const fingerprint = await refreshHomeNetwork();
-  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, systemAppearance: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
+  settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", runOnUse: false, runOnUseAfter: "", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, systemAppearance: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
   automationEditors.expandedIds.add(settings.schedules.at(-1).id);
   await save(); renderSchedules();
 });

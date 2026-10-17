@@ -871,13 +871,23 @@ impl SharedState {
             loop {
                 let now = Local::now();
                 if let Ok(settings) = state.load_settings() {
-                    let due = scheduler.due(now, settings.schedules);
+                    let due = scheduler.due(now, settings.schedules, |start| {
+                        let elapsed = now.signed_duration_since(start);
+                        crate::activity::used_within(elapsed.as_seconds_f64())
+                    });
                     if !due.is_empty() {
                         let state = state.clone();
                         tauri::async_runtime::spawn(async move {
                             // Complete earlier missed actions before applying later ones.
                             for (occurrence, schedule) in due {
-                                if now.signed_duration_since(occurrence).num_seconds() >= 60 {
+                                if occurrence == now {
+                                    eprintln!(
+                                        "{} Grindlewald automation running early: the Mac was used before {}",
+                                        Local::now().to_rfc3339(),
+                                        schedule.time
+                                    );
+                                } else if now.signed_duration_since(occurrence).num_seconds() >= 60
+                                {
                                     eprintln!(
                                         "{} Grindlewald automation catching up: scheduled for {}",
                                         Local::now().to_rfc3339(),
