@@ -460,7 +460,7 @@ function renderPresets() {
     const colorMaximum = preset.mode === "color" ? 360 : 100;
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-preset-index="${index}">
-      <div class="card-title collapsible-card-title" data-collapse-editor-header><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><strong>${escapeHtml(preset.name || "Untitled preset")}</strong><span><button class="text-button" data-set-preset-current="${index}">Set to current</button><button class="remove-button" data-remove-preset="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse preset"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
       <div class="field-grid">
         <label class="field">Name<input data-preset-field="name" value="${escapeHtml(preset.name)}"></label>
         <label class="field">Mode<select data-preset-field="mode"><option value="color" ${preset.mode === "color" ? "selected" : ""}>Color</option><option value="white" ${preset.mode === "white" ? "selected" : ""}>White</option></select></label>
@@ -777,6 +777,14 @@ document.addEventListener("click", async (event) => {
     }
   }
 
+  const setPresetCurrent = event.target.closest("[data-set-preset-current]");
+  if (setPresetCurrent) {
+    const preset = settings.presets[Number(setPresetCurrent.dataset.setPresetCurrent)];
+    preset.mode = settings.mode === "white" ? "white" : "color";
+    preset.value = preset.mode === "white" ? settings.white : settings.color;
+    preset.brightness = settings.brightness;
+    await save(); renderAll();
+  }
   const removePreset = event.target.closest("[data-remove-preset]");
   if (removePreset) {
     expandedEditorKey = null;
