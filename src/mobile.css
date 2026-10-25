@@ -15,3 +15,7 @@ html[data-platform="android"] .pace-control { grid-template-columns: auto minmax
 .sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 
 html[data-platform="android"] .future-me-reminder, html[data-platform="android"] .white-breathing-reminder { display: none; }
+html[data-platform="android"] nav { height: 48px; margin-top: 0; }
+html[data-platform="android"] .controller-status { height: 44px; border-radius: 0; }
+html[data-platform="android"] .page { padding-bottom: 56px; }
+html[data-platform="android"] .error-panel { bottom: 54px; }

@@ -33,6 +33,7 @@ try {
    assert.equal(await page.locator('[data-page="automations-page"]').count(),0);
    assert.equal(await page.locator('#automations-page').count(),0);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   assert.equal(await page.evaluate(()=>{const nav=document.querySelector('nav').getBoundingClientRect();return [...document.querySelectorAll('nav button')].every(button=>button.getBoundingClientRect().bottom<=nav.bottom);}),true);
   } else {
    await page.locator('[data-page="automations-page"]').click();
    await page.locator('#add-schedule').click();
