@@ -32,6 +32,8 @@ try {
  assert.equal(await evaluate(`document.querySelector('#automations-page')===null`),true);
  await evaluate(`document.querySelector('[data-page="settings-page"]').click()`);
  if(process.argv[2]==='prepare') {
+  await evaluate(`document.querySelector('#sync-create').click()`);
+  await until(`document.querySelector('#sync-status').textContent==='Synced'`);
   await evaluate(`document.querySelector('#add-preset').click()`);
   await pause(500);
   await evaluate(`document.querySelector('#preset-editor [data-expand-editor]:last-child')?.click()`);
@@ -39,7 +41,9 @@ try {
   await evaluate(`(()=>{const input=document.querySelector('[data-preset-field="name"]');input.value='Android CI retained';input.dispatchEvent(new Event('change',{bubbles:true}));input.blur();})()`);
  }
  await until(`window.__TAURI__.core.invoke('get_settings').then(s=>s.presets.some(p=>p.name==='Android CI retained'))`);
+ assert.equal(await evaluate(`document.querySelector('#sync-code').value.startsWith('grindlewald1:')`),true);
+ await until(`document.querySelector('#sync-status').textContent==='Synced'`);
  await evaluate(`document.querySelector('[data-page="controller-page"]').click()`);
  assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);
- console.log('PASS: Android Control/Settings and native preset persistence');
+ console.log('PASS: Android Control/Settings, live sync, and native preset persistence');
 } finally {socket.close();adb('forward','--remove',`tcp:${port}`);}
