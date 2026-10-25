@@ -40,3 +40,14 @@ test('relay exchanges two clients and rejects automations or unauthenticated req
  const invalid=structuredClone(a.state.records);Object.values(invalid)[0].value.shellCommand='no';
  assert.equal((await worker.fetch(request(invalid),env)).status,400);
 });
+test('remote control is restricted to floodlights and claimed at most once',async()=>{
+ const values=new Map();const storage={get:async k=>values.get(k),put:async(k,v)=>values.set(k,v),transaction:async fn=>fn(storage)};
+ const room=new Room({storage});
+ const call=body=>room.fetch(new Request('https://example.test/control',{method:'POST',body:JSON.stringify(body)}));
+ assert.equal((await call({type:'request',id:'synthetic',on:true,offAfterSeconds:300})).status,200);
+ assert.equal((await (await call({type:'claim'})).json()).command.on,true);
+ assert.equal((await (await call({type:'claim'})).json()).command,null);
+ await call({type:'result',id:'synthetic',ok:true,message:'On'});
+ assert.deepEqual((await (await call({type:'status',id:'synthetic'})).json()).result,{ok:true,message:'On'});
+ assert.equal((await call({type:'shell',command:'anything'})).status,400);
+});

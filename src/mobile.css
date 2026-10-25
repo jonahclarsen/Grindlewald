@@ -13,3 +13,5 @@ html[data-platform="android"] .floodlight-actions { flex-wrap: wrap; }
 html[data-platform="android"] .pace-control { grid-template-columns: auto minmax(30px, 1fr) auto; }
 #sync-code { width: 100%; font-size: 13px; overflow-wrap: anywhere; }
 .sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+html[data-platform="android"] .future-me-reminder, html[data-platform="android"] .white-breathing-reminder { display: none; }

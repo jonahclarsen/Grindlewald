@@ -137,6 +137,13 @@
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
 
+        <div class="editor-card">
+          <h3>Sync</h3>
+          <p id="sync-status" role="status"></p>
+          <input id="sync-code" type="password" autocomplete="off" spellcheck="false" aria-label="Pairing code" placeholder="Pairing code">
+          <div class="sync-actions"><button id="sync-create" class="secondary">Create code</button><button id="sync-copy" class="secondary">Copy</button><button id="sync-join" class="primary">Pair</button><button id="sync-disconnect" class="text-button" hidden>Disconnect</button></div>
+          <small class="muted">Paste this code on your other device. Anyone with it can access your lights and presets.</small>
+        </div>
         <div id="mobile-settings" hidden class="editor-card">
           <h3>Android</h3>
           <div class="power-row"><button id="mobile-permissions" class="secondary">Permissions</button><button id="mobile-update" class="primary">Check for updates</button></div>

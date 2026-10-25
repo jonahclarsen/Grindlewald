@@ -12,7 +12,37 @@ export function validRecord(id, record) {
 }
 export class Room {
   constructor(state) { this.storage=state.storage; }
+  async control(request) {
+    const text=await request.text();
+    if(text.length>2000)return json({error:'Too large'},413);
+    let input;try{input=JSON.parse(text);}catch{return json({error:'Invalid JSON'},400);}
+    return this.storage.transaction(async storage=>{
+      const now=Date.now();
+      if(input.type==='request') {
+        if(!/^[a-zA-Z0-9-]{1,80}$/.test(input.id) || typeof input.on!=='boolean' || ![null,300].includes(input.offAfterSeconds))return json({error:'Invalid command'},400);
+        const previous=await storage.get('control');
+        if(previous && now-previous.created<25000)return json({error:'A command is already pending'},409);
+        await storage.put('control',{id:input.id,on:input.on,offAfterSeconds:input.offAfterSeconds,created:now});
+        return json({ok:true});
+      }
+      if(input.type==='claim') {
+        const command=await storage.get('control');
+        if(!command || command.claimed || now-command.created>15000)return json({command:null});
+        await storage.put('control',{...command,claimed:true});
+        return json({command});
+      }
+      const command=await storage.get('control');
+      if(input.type==='result') {
+        if(command?.id!==input.id || !command.claimed || typeof input.ok!=='boolean' || typeof input.message!=='string')return json({error:'Invalid result'},400);
+        await storage.put('control',{...command,result:{ok:input.ok,message:input.message.slice(0,500)}});
+        return json({ok:true});
+      }
+      if(input.type==='status')return json({result:command?.id===input.id ? command.result ?? null : null});
+      return json({error:'Unknown command'},400);
+    });
+  }
   async fetch(request) {
+    if(new URL(request.url).pathname==='/control')return this.control(request);
     if (Number(request.headers.get('Content-Length')) > 256000) return json({error:'Too large'},413);
     const text = await request.text();
     if (text.length > 256000) return json({error:'Too large'},413);
@@ -30,7 +60,7 @@ export class Room {
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null,{headers});
-    if (request.method !== 'POST' || new URL(request.url).pathname !== '/sync') return json({error:'Not found'},404);
+    if (request.method !== 'POST' || !['/sync','/control'].includes(new URL(request.url).pathname)) return json({error:'Not found'},404);
     const token=request.headers.get('Authorization')?.replace(/^Bearer /,'');
     if (!/^[a-f0-9]{64}$/.test(token ?? '')) return json({error:'Pairing code required'},401);
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));

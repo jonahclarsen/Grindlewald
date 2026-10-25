@@ -4,7 +4,7 @@ export function prepareMobile() {
   if (!isMobile) return;
   const service = document.querySelector('.privileged-service-card');
   service?.previousElementSibling?.remove(); service?.remove();
-  for (const selector of ['#automations-page', '[data-page="automations-page"]', '#service-notice', '#quit-button', '#remove-schedule-dialog', 'nav kbd', '.future-me-reminder', '.white-breathing-reminder']) {
+  for (const selector of ['#automations-page', '[data-page="automations-page"]', '#service-notice', '#quit-button', '#remove-schedule-dialog', 'nav kbd']) {
     document.querySelectorAll(selector).forEach(node => node.remove());
   }
   document.querySelector('#mobile-settings').hidden = false;

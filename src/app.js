@@ -1,3 +1,4 @@
+import { createSync } from "./sync.js";
 import { isMobile, prepareMobile, startMobileUpdates } from "./mobile.js";
 import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
 import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
@@ -36,6 +37,7 @@ const demoSettings = {
 };
 
 let settings;
+let sync;
 let currentHomeNetwork = null;
 let currentNetworkState = "loading";
 let networkRefreshing = 0;
@@ -274,6 +276,7 @@ async function call(command, args = {}) {
 }
 
 async function callBackend(command, args = {}) {
+  if (isMobile && command === "set_floodlights") return sync.floodlights(args);
   if (demoMode) {
     if (command === "connection_status") return { effectActive: demoEffectActive };
     if (command === "execute_control" && !["seek_breathing", "set_white_breathing_pace"].includes(args.command.command)) {
@@ -306,6 +309,7 @@ async function callBackend(command, args = {}) {
 async function save() {
   try {
     await call("save_settings", { settings });
+    sync?.changed();
     setStatus("Saved");
     return true;
   } catch (error) {
@@ -547,6 +551,7 @@ function sizeShellCommandInputs() {
 window.addEventListener("resize", sizeShellCommandInputs);
 
 function renderPrivilegedService() {
+  if (isMobile) return;
   const title = privilegedService.installed
     ? !privilegedService.healthy ? "Repair required" : privilegedService.current ? "Ready" : "Update required"
     : "Not installed";
@@ -594,7 +599,7 @@ function renderDevices() {
   $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => {
     const editorKey = `device:${index}`;
     if (expandedEditorKey !== editorKey) {
-      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${escapeHtml(canonicalIdentifier(device.identifier))}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${device.identifier.startsWith("UNPAIRED-") ? "Pair on this device" : escapeHtml(canonicalIdentifier(device.identifier))}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
     }
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
@@ -615,7 +620,8 @@ function renderDevices() {
     const action = configuredDevice
       ? '<button class="secondary compact" disabled>Added</button>'
       : `<button class="primary compact" data-add-discovered="${index}">Add</button>`;
-    return `<article class="editor-card"><div class="card-title"><span><strong>${escapeHtml(device.name)}</strong>${detail}</span>${action}</div></article>`;
+    const pairs = !configuredDevice ? settings.devices.filter(light => light.identifier.startsWith("UNPAIRED-")).map(light => `<button class="secondary compact" data-pair-light="${escapeHtml(light.identifier)}" data-discovered-index="${index}">Pair ${escapeHtml(light.name)}</button>`).join("") : "";
+    return `<article class="editor-card"><div class="card-title"><span><strong>${escapeHtml(device.name)}</strong>${detail}</span>${action}</div><div class="sync-actions">${pairs}</div></article>`;
   }).join("");
 }
 
@@ -804,6 +810,12 @@ document.addEventListener("click", async (event) => {
     await save(); renderAll();
   }
 
+  const pairLight = event.target.closest("[data-pair-light]");
+  if (pairLight) {
+    try { await sync.pair(pairLight.dataset.pairLight, discovered[Number(pairLight.dataset.discoveredIndex)].identifier); }
+    catch (error) { setStatus(String(error), "error"); }
+    return;
+  }
   const addDiscovered = event.target.closest("[data-add-discovered]");
   if (addDiscovered) {
     const device = discovered[Number(addDiscovered.dataset.addDiscovered)];
@@ -1231,3 +1243,11 @@ else if ((isMobile ? ["settings"] : ["automations", "settings"]).includes(reques
 
 prepareMobile();
 if (isMobile && !demoMode) startMobileUpdates(invoke);
+
+sync = createSync({
+  platform:isMobile ? "android" : "macos",
+  getSettings:()=>settings,
+  applySettings:async next=>{settings=next; await call("save_settings", {settings});},
+  onChange:()=>renderAll(),
+  executeFloodlights:({on,offAfterSeconds})=>call("set_floodlights",{on,offAfterSeconds}),
+});
