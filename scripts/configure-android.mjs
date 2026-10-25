@@ -7,7 +7,13 @@ const java = `${main}/java/com/jonahclarsen/grindlewald`;
 for (const file of ['MobileBridge.kt', 'GrindlewaldUpdater.kt']) cpSync(`android/${file}`, `${java}/${file}`);
 const activity = `${java}/MainActivity.kt`;
 let text = readFileSync(activity, 'utf8');
-text = text.replace('super.onCreate(savedInstanceState)', 'super.onCreate(savedInstanceState)\n        MobileBridge.attach(this)');
+text = text.replace('super.onCreate(savedInstanceState)', `super.onCreate(savedInstanceState)
+        MobileBridge.attach(this)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout() or androidx.core.view.WindowInsetsCompat.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }`);
 writeFileSync(activity, text);
 const manifest = `${main}/AndroidManifest.xml`;
 text = readFileSync(manifest, 'utf8').replace('<application', `<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

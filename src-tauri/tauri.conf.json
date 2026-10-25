@@ -16,6 +16,7 @@
         "width": 480,
         "height": 650,
         "visible": false,
+        "backgroundThrottling": "disabled",
         "resizable": false,
         "maximizable": false,
         "minimizable": false,

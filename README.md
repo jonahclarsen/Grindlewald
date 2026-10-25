@@ -221,7 +221,7 @@ Bluetooth addresses differ between macOS and Android. On the new device, choose
 **Discover**, then **Pair [light name]** beside the matching nearby light. Each platform's
 address stays associated with that shared light. Android Floodlights buttons send
 requests to the paired Mac, which must be running Grindlewald; they use the Mac's
-existing floodlight script and credentials. Requests expire rather than running later
+existing floodlight script and credentials. Hidden-window relay polling requires macOS 14 or newer; on older Macs keep the window open. Requests expire rather than running later
 when the Mac comes back online.
 
 The pairing code grants access to that room, including its configured Bluetooth

@@ -247,7 +247,7 @@ function setFloodlightsBusy(isBusy) {
 
 // Mirror effects started or stopped elsewhere (CLI, automations) and follow breathing playback.
 async function refreshEffectState() {
-  if (refreshingEffectState) return;
+  if (document.hidden || refreshingEffectState) return;
   refreshingEffectState = true;
   try {
     const status = await call("connection_status");
@@ -575,7 +575,7 @@ async function refreshPrivilegedService() {
 }
 
 function refreshScheduleAvailability() {
-  if (isMobile) return;
+  if (isMobile || document.hidden) return;
   if (!settings) return;
   document.querySelectorAll("[data-schedule-pause-status]").forEach((status) => {
     const schedule = settings.schedules[Number(status.dataset.schedulePauseStatus)];
