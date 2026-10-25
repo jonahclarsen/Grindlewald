@@ -4,7 +4,18 @@ export function newer(a, b) {
 }
 export function mergeRecords(left, right) {
   const merged = structuredClone(left);
-  for (const [id, record] of Object.entries(right)) if (newer(record, merged[id])) merged[id] = structuredClone(record);
+  for (const [id, record] of Object.entries(right)) {
+    const current = merged[id];
+    const winner = newer(record, current) ? record : current;
+    merged[id] = structuredClone(winner);
+    // Platforms own independent addresses. An offline rename must not erase a
+    // newly paired address on the other platform.
+    if (current?.kind === 'devices' && record.kind === 'devices' && current.value && record.value) {
+      const loser = winner === record ? current : record;
+      const addresses = {...loser.value.addresses, ...winner.value.addresses};
+      merged[id].value.addresses = Object.fromEntries(Object.entries(addresses).sort(([a],[b]) => a.localeCompare(b)));
+    }
+  }
   return merged;
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -38,7 +49,10 @@ export class SyncModel {
       for (const old of previous) {
         const oldKey = key(kind,old);
         if (!settings[kind].some(value => key(kind,value) === oldKey)) {
-          this.write(ids[oldKey], kind, null); delete ids[oldKey];
+          for (const [id, record] of Object.entries(this.state.records)) {
+            if (id === ids[oldKey] || (record.kind === kind && record.value?.name === old.name)) this.write(id, kind, null);
+          }
+          delete ids[oldKey];
         }
       }
       this.state.baseline[kind] = structuredClone(settings[kind]);

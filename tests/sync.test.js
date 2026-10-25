@@ -51,3 +51,18 @@ test('remote control is restricted to floodlights and claimed at most once',asyn
  assert.deepEqual((await (await call({type:'status',id:'synthetic'})).json()).result,{ok:true,message:'On'});
  assert.equal((await call({type:'shell',command:'anything'})).status,400);
 });
+test('concurrent pairing and an offline rename retain both platform addresses',()=>{
+ const a=model('macos');a.capture(settings());const b=model('android');b.merge(a.state.records);
+ const local=a.materialize(settings());let remote=b.materialize({devices:[],presets:[]});
+ local.devices[0].name='Renamed offline';a.capture(local);
+ remote=b.pair(remote,remote.devices[0].identifier,'SYNTHETIC-ANDROID');
+ const ab=mergeRecords(a.state.records,b.state.records),ba=mergeRecords(b.state.records,a.state.records);
+ assert.deepEqual(ab,ba);
+ const addresses=Object.values(ab).find(r=>r.kind==='devices').value.addresses;
+ assert.deepEqual(addresses,{android:'SYNTHETIC-ANDROID',macos:'SYNTHETIC-MAC-ID'});
+});
+test('deleting a duplicate offline addition does not reveal the hidden duplicate',()=>{
+ const a=model('macos'),b=model('android');a.capture(settings());b.capture(settings());a.merge(b.state.records);
+ const merged=a.materialize(settings());assert.equal(merged.presets.length,1);
+ merged.presets=[];a.capture(merged);assert.equal(a.materialize(merged).presets.length,0);
+});
