@@ -49,6 +49,8 @@ try {
   await context.addInitScript(({mobile})=>{
    const defaults={devices:mobile?[]:[{name:'CI light',identifier:'SYNTHETIC-DESKTOP',profile:'h6005',enabled:true}],presets:mobile?[]:[{name:'CI evening',mode:'color',value:'#ff4500',brightness:0.4}],schedules:[],color:'#ff4500',white:'#ffd5ad',mode:'color',brightness:0.4,connectionHoldSeconds:6,breathingIntervalMs:350,breathingColorStep:1,whiteBreathingSweepSeconds:30};
    window.__TAURI__={core:{invoke:async(command,args={})=>{
+    if(command==='load_sync_state')return JSON.parse(localStorage.getItem('native-sync-state')??'null');
+    if(command==='save_sync_state'){localStorage.setItem('native-sync-state',JSON.stringify(args.value));return;}
     if(command==='get_settings')return JSON.parse(localStorage.getItem('native-settings')??JSON.stringify(defaults));
     if(command==='save_settings'){localStorage.setItem('native-settings',JSON.stringify(args.settings));return;}
     if(command==='connection_status')return {effectActive:false};

@@ -309,7 +309,7 @@ async function callBackend(command, args = {}) {
 async function save() {
   try {
     await call("save_settings", { settings });
-    sync?.changed();
+    await sync?.changed();
     setStatus("Saved");
     return true;
   } catch (error) {
@@ -1245,12 +1245,14 @@ if (requestedPage === "presets") showPage("settings-page");
 else if ((isMobile ? ["settings"] : ["automations", "settings"]).includes(requestedPage)) showPage(`${requestedPage}-page`);
 
 prepareMobile();
-if (isMobile && !demoMode) startMobileUpdates(invoke);
 
-sync = createSync({
+sync = await createSync({
   platform:isMobile ? "android" : "macos",
+  ...(!demoMode ? {load:()=>call("load_sync_state"),store:value=>call("save_sync_state",{value})} : {}),
   getSettings:()=>settings,
   applySettings:async next=>{settings=next; await call("save_settings", {settings});},
   onChange:()=>renderAll(),
   executeFloodlights:({on,offAfterSeconds})=>call("set_floodlights",{on,offAfterSeconds}),
 });
+
+if (isMobile && !demoMode) startMobileUpdates(invoke);

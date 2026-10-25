@@ -1,15 +1,25 @@
 import {SyncModel} from './sync-model.js';
 const ENDPOINT = 'https://grindlewald-sync.cf-cuicn.workers.dev';
 const STORAGE = 'grindlewald-sync-v1';
-export function createSync({platform, getSettings, applySettings, executeFloodlights, onChange = () => {}}) {
-  let stored;
-  try { stored=JSON.parse(localStorage.getItem(STORAGE) ?? '{}'); } catch { stored={}; }
+export async function createSync({platform, getSettings, applySettings, executeFloodlights, onChange = () => {},
+  load = async () => JSON.parse(localStorage.getItem(STORAGE) ?? 'null'),
+  store = async value => localStorage.setItem(STORAGE, JSON.stringify(value)),
+}) {
+  const stored = await load() ?? {};
   let token=stored.token ?? '';
   let model=new SyncModel(platform, stored.model);
   let busy=false, timer;
   const status=document.querySelector('#sync-status');
   const code=document.querySelector('#sync-code');
-  const persist=()=>localStorage.setItem(STORAGE,JSON.stringify({token,model:model.state}));
+  let saveChain=Promise.resolve(), lastPersisted=JSON.stringify(stored);
+  const persist=()=>{
+    const snapshot=JSON.stringify({token,model:model.state});
+    saveChain=saveChain.catch(()=>{}).then(async()=>{
+      if(snapshot===lastPersisted)return;
+      await store(JSON.parse(snapshot)); lastPersisted=snapshot;
+    });
+    return saveChain;
+  };
   const display=()=>{ code.value=token ? `grindlewald1:${token}` : ''; document.querySelector('#sync-disconnect').hidden=!token; };
   const request=async(path, body)=>{
     if (!token) throw Error('Pair your devices in Settings first');
@@ -17,13 +27,13 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
     if (!response.ok) throw Error(`Sync unavailable (${response.status})`);
     return response.json();
   };
-  const capture=()=>{ if (token) {model.capture(getSettings());persist();} };
+  const capture=async()=>{ if (token) {model.capture(getSettings());await persist();} };
   const apply=async()=>{
     const before=getSettings(); const next=model.materialize(before);
     if (JSON.stringify([before.devices,before.presets]) !== JSON.stringify([next.devices,next.presets])) {
       await applySettings(next); onChange();
     }
-    persist();
+    await persist();
   };
   async function exchange() {
     if (!token || busy) return;
@@ -31,9 +41,9 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
     if (document.hasFocus() && document.activeElement?.matches('input,select,textarea')) return;
     busy=true;
     try {
-      capture();
+      await capture();
       const result=await request('sync',{records:model.state.records});
-      capture(); // Preserve edits made during the network request.
+      await capture(); // Preserve edits made during the network request.
       model.merge(result.records); await apply();
       status.textContent='Synced';
       if (platform==='macos') {
@@ -84,14 +94,14 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
         await applySettings(model.materialize(remote)); onChange();
       } else model.capture(getSettings());
       const result=await request('sync',{records:model.state.records});model.merge(result.records);await apply();
-      persist();display();status.textContent='Synced';
+      await persist();display();status.textContent='Synced';
     } catch(error) {token=previous.token;model=previous.model;status.textContent=String(error.message ?? error);}
     finally {busy=false;}
   }
   document.querySelector('#sync-create').onclick=()=>connect(false);
   document.querySelector('#sync-join').onclick=()=>connect(true);
   document.querySelector('#sync-copy').onclick=()=>{code.select();navigator.clipboard.writeText(code.value).catch(()=>document.execCommand('copy'));};
-  document.querySelector('#sync-disconnect').onclick=()=>{token='';persist();display();status.textContent='Sync off';};
+  document.querySelector('#sync-disconnect').onclick=async()=>{token='';await persist();display();status.textContent='Sync off';};
   display();status.textContent=token?'Connecting…':'Pair once to share lights and presets';
   const schedule=()=>{clearTimeout(timer);timer=setTimeout(async()=>{await exchange();schedule();},platform==='macos'?5000:8000);};
   schedule();exchange();
@@ -99,9 +109,9 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
   window.addEventListener('focus',exchange);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) exchange();});
   return {
-    changed(){capture();},
-    renamePreset(oldName,name){if(token){model.renamePreset(oldName,name);persist();}},
-    async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));persist();onChange();exchange();},
+    changed(){return capture();},
+    renamePreset(oldName,name){if(token)model.renamePreset(oldName,name);},
+    async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));await persist();onChange();exchange();},
     async floodlights(args){
       const id=crypto.randomUUID();
       await request('control',{type:'request',id,on:args.on,offAfterSeconds:args.offAfterSeconds ?? null});

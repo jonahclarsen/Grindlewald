@@ -453,6 +453,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
+            crate::sync_store::load_sync_state,
+            crate::sync_store::save_sync_state,
             discover_lights,
             execute_control,
             connection_status,

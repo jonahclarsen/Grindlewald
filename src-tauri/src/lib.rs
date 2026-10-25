@@ -18,6 +18,7 @@ pub mod settings;
 pub mod spacing;
 pub mod state;
 mod timing;
+mod sync_store;
 
 #[cfg(not(target_os = "android"))]
 mod desktop;

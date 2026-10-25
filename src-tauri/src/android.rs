@@ -81,6 +81,7 @@ pub fn run() {
         });
         app.manage(state); Ok(())
     }).invoke_handler(tauri::generate_handler![get_settings, save_settings, discover_lights,
-        execute_control, connection_status, disconnect_lights, mobile_action, copy_error_details])
+        execute_control, connection_status, disconnect_lights, mobile_action, copy_error_details,
+        crate::sync_store::load_sync_state, crate::sync_store::save_sync_state])
       .run(tauri::generate_context!()).expect("error running Grindlewald");
 }
