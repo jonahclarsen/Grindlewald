@@ -1,0 +1,15 @@
+html[data-platform="android"], html[data-platform="android"] body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
+html[data-platform="android"] .app-shell { width: 100%; height: 100dvh; max-height: none; border-radius: 0; padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: env(safe-area-inset-bottom); }
+html[data-platform="android"] .page { min-width: 0; overflow-x: hidden; }
+html[data-platform="android"] button { min-height: 44px; }
+html[data-platform="android"] input:not([type="range"]), html[data-platform="android"] select { font-size: 16px; max-width: 100%; }
+html[data-platform="android"] .picker-track { height: 32px; }
+html[data-platform="android"] nav { grid-template-columns: 1fr 1fr; }
+html[data-platform="android"] nav kbd, html[data-platform="android"] #automations-page,
+html[data-platform="android"] [data-page="automations-page"], html[data-platform="android"] .privileged-service-card,
+html[data-platform="android"] #service-notice { display: none; }
+html[data-platform="android"] .floodlight-card { flex-wrap: wrap; }
+html[data-platform="android"] .floodlight-actions { flex-wrap: wrap; }
+html[data-platform="android"] .pace-control { grid-template-columns: auto minmax(30px, 1fr) auto; }
+#sync-code { width: 100%; font-size: 13px; overflow-wrap: anywhere; }
+.sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

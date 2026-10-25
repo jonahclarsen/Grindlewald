@@ -2,10 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Grindlewald</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="lumen.css" />
+    <link rel="stylesheet" href="mobile.css" />
     <script type="module" src="app.js"></script>
   </head>
   <body>
@@ -136,6 +137,11 @@
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
 
+        <div id="mobile-settings" hidden class="editor-card">
+          <h3>Android</h3>
+          <div class="power-row"><button id="mobile-permissions" class="secondary">Permissions</button><button id="mobile-update" class="primary">Check for updates</button></div>
+          <p id="mobile-version" class="muted"></p><p id="mobile-update-status" role="status"></p>
+        </div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 

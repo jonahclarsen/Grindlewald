@@ -1,3 +1,4 @@
+import { isMobile, prepareMobile, startMobileUpdates } from "./mobile.js";
 import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
 import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
@@ -298,6 +299,7 @@ async function callBackend(command, args = {}) {
     if (command === "revoke_privileged_job") return "Administrator job approval revoked";
     return command === "test_schedule" ? "Updated 2 light(s). Shell command completed." : "Updated 2 light(s)";
   }
+  if (isMobile && ["hide_window", "quit_app"].includes(command)) return;
   return invoke(command, args);
 }
 
@@ -464,6 +466,7 @@ function clockTime(value) {
 }
 
 function renderSchedules() {
+  if (isMobile) return;
   settings.schedules.forEach((schedule) => { schedule.allLights = usesAllLights(schedule); });
   const presetOptions = '<option value="">No preset</option>' + settings.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</option>`).join("");
   $("#schedule-editor").innerHTML = settings.schedules.length ? sortedScheduleEntries(settings.schedules).map(({ schedule, index }) => {
@@ -561,11 +564,13 @@ function renderPrivilegedService() {
 }
 
 async function refreshPrivilegedService() {
+  if (isMobile) return;
   privilegedService = await call("privileged_service_status");
   renderPrivilegedService();
 }
 
 function refreshScheduleAvailability() {
+  if (isMobile) return;
   if (!settings) return;
   document.querySelectorAll("[data-schedule-pause-status]").forEach((status) => {
     const schedule = settings.schedules[Number(status.dataset.schedulePauseStatus)];
@@ -1186,17 +1191,17 @@ refreshEffectState();
 
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 
-const pageOrder = ["controller-page", "automations-page", "settings-page"];
+const pageOrder = isMobile ? ["controller-page", "settings-page"] : ["controller-page", "automations-page", "settings-page"];
 // ⌘← and ⌘→ keep their usual line-start/line-end meaning inside text fields.
 const editsText = (element) => element.matches?.('textarea, [contenteditable], input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"])');
 
 document.addEventListener("keydown", (event) => {
-  if ($("#remove-schedule-dialog").open) return;
+  if ($("#remove-schedule-dialog")?.open) return;
   const pageIndex = pageOrder.findIndex((id) => $(`#${id}`).classList.contains("active"));
   const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
   if (event.metaKey && !event.altKey && !event.ctrlKey && /^[1-3]$/.test(event.key)) {
     event.preventDefault();
-    showPage(pageOrder[Number(event.key) - 1]);
+    if (pageOrder[Number(event.key) - 1]) showPage(pageOrder[Number(event.key) - 1]);
   } else if (event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey && step && !editsText(event.target)) {
     event.preventDefault();
     showPage(pageOrder[Math.max(0, Math.min(pageOrder.length - 1, pageIndex + step))]);
@@ -1222,4 +1227,7 @@ await refreshPrivilegedService();
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");
 if (requestedPage === "presets") showPage("settings-page");
-else if (["automations", "settings"].includes(requestedPage)) showPage(`${requestedPage}-page`);
+else if ((isMobile ? ["settings"] : ["automations", "settings"]).includes(requestedPage)) showPage(`${requestedPage}-page`);
+
+prepareMobile();
+if (isMobile && !demoMode) startMobileUpdates(invoke);

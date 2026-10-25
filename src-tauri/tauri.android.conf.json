@@ -1,0 +1,6 @@
+{
+  "app": {
+    "windows": [{"label":"main","title":"Grindlewald","visible":true,"resizable":true,"alwaysOnTop":false,"skipTaskbar":false,"decorations":true,"transparent":false}]
+  },
+  "bundle": {"targets":"all", "android":{"minSdkVersion":26}}
+}

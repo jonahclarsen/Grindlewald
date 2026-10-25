@@ -1,0 +1,111 @@
+name: Android
+on:
+  push:
+    branches: ['main', 'feature/**']
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android,aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+      - run: |
+          sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          git clone https://github.com/deviceplug/jni-utils-rs.git /tmp/jni-utils
+          git -C /tmp/jni-utils checkout 1737fd69e8d980ec045df6daafef250f2dd07ebd
+      - run: pnpm tauri android init --ci
+      - run: node scripts/configure-android.mjs
+      - run: pnpm tauri android build --apk --debug --target x86_64
+      - run: |
+          cp "$(find src-tauri/gen/android -path '*debug*' -name '*.apk' | head -1)" grindlewald-debug.apk
+          ANDROID_VERSION=0.1.1 node scripts/set-android-version.mjs
+          pnpm tauri android build --apk --debug --target x86_64
+          cp "$(find src-tauri/gen/android -path '*debug*' -name '*.apk' | head -1)" update.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-apks
+          path: |
+            grindlewald-debug.apk
+            update.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash scripts/android-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-diagnostics
+          path: |
+            android-log.txt
+            android-screen.png
+      - name: Configure release signing
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE"
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+      - name: Build signed release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # Reinitialize so CI patches are applied exactly once.
+          rm -rf src-tauri/gen/android
+          pnpm tauri android init --ci
+          ANDROID_VERSION="${GITHUB_REF_NAME#v}" node scripts/configure-android.mjs
+          pnpm tauri android build --apk --target aarch64
+          cp "$(find src-tauri/gen/android -path '*release*' -name '*.apk' | head -1)" grindlewald-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose grindlewald-arm64.apk
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: android-release
+          path: grindlewald-arm64.apk
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Grindlewald ${GITHUB_REF_NAME#v}" --notes 'Android Control and Settings, shared lights and presets, and automatic update checks.' grindlewald-arm64.apk

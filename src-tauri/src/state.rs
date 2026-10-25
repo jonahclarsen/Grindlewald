@@ -1,3 +1,5 @@
+#[cfg(not(target_os = "android"))]
+use crate::privileged;
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -18,7 +20,6 @@ use crate::{
         white_kelvin_at_phase, white_kelvin_from_hex, white_phase,
     },
     command::ControlCommand,
-    privileged,
     protocol::DeviceProfile,
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
 };
@@ -208,6 +209,7 @@ impl SharedState {
     }
 
     // Automation attempts do not cancel each other's pending retries.
+#[cfg(not(target_os = "android"))]
     async fn execute_automatic(&self, command: ControlCommand) -> Result<String, String> {
         self.execute_command(command, false).await
     }
@@ -621,6 +623,7 @@ impl SharedState {
         result.map(|_| "Effect stopped".into())
     }
 
+#[cfg(not(target_os = "android"))]
     pub async fn run_schedule_by_id(&self, id: &str) -> Result<String, String> {
         self.manual_light_signal.send_replace(());
         let settings = self.load_settings()?;
@@ -633,6 +636,7 @@ impl SharedState {
         self.run_schedule(schedule).await
     }
 
+#[cfg(not(target_os = "android"))]
     pub fn approve_privileged_job(&self, id: &str) -> Result<String, String> {
         let mut settings = self.load_settings()?;
         let schedule_index = settings
@@ -656,6 +660,7 @@ impl SharedState {
         Ok("Administrator command approved for unattended use".into())
     }
 
+#[cfg(not(target_os = "android"))]
     pub fn revoke_privileged_job(&self, id: &str) -> Result<String, String> {
         let mut settings = self.load_settings()?;
         let schedule = settings
@@ -671,6 +676,7 @@ impl SharedState {
         Ok(message)
     }
 
+#[cfg(not(target_os = "android"))]
     pub fn clear_privileged_approvals(&self) -> Result<(), String> {
         let mut settings = self.load_settings()?;
         for schedule in &mut settings.schedules {
@@ -681,6 +687,7 @@ impl SharedState {
         self.save_settings(&settings)
     }
 
+#[cfg(not(target_os = "android"))]
     async fn run_schedule(&self, schedule: Schedule) -> Result<String, String> {
         eprintln!(
             "{} Grindlewald automation started: scheduled time {}, floodlight action {:?}",
@@ -810,6 +817,7 @@ impl SharedState {
 
     // Try every target even when the first one is unavailable. Shell, appearance, and floodlight
     // actions stay outside this method so background retries cannot repeat them.
+#[cfg(not(target_os = "android"))]
     async fn run_schedule_lights(&self, schedule: &Schedule) -> (Result<String, String>, bool) {
         let targets = schedule.light_targets();
         if targets.is_empty() {
@@ -864,6 +872,7 @@ impl SharedState {
         });
     }
 
+#[cfg(not(target_os = "android"))]
     pub fn start_scheduler(&self) {
         let state = self.clone();
         tauri::async_runtime::spawn(async move {
