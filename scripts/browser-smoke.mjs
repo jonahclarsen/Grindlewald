@@ -89,7 +89,7 @@ try {
  await desktop.locator('#preset-editor').filter({hasText:'Offline palette'}).waitFor();
  await desktop.locator('[data-page="controller-page"]').click();
  await phone.locator('[data-floodlights="true"]:not([data-floodlights-off-after])').click();
- await phone.locator('#status').filter({hasText:'Floodlights on'}).waitFor({timeout:30000});
+ await phone.locator('#status').filter({hasText:/^Floodlights on$/}).waitFor({timeout:30000});
  assert.equal(await desktop.evaluate(()=>JSON.parse(localStorage.getItem('floodlight-request')).on),true);
  for(const context of contexts)await context.close();
 } finally {await browser.close();server.close();}
