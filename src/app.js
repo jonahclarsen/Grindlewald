@@ -1248,7 +1248,7 @@ prepareMobile();
 
 sync = await createSync({
   platform:isMobile ? "android" : "macos",
-  ...(!demoMode ? {load:()=>call("load_sync_state"),store:value=>call("save_sync_state",{value})} : {}),
+  ...(!demoMode ? {load:()=>call("load_sync_state"),store:value=>call("save_sync_state",{value}),copy:text=>call("copy_error_details",{text})} : {}),
   getSettings:()=>settings,
   applySettings:async next=>{settings=next; await call("save_settings", {settings});},
   onChange:()=>renderAll(),

@@ -4,6 +4,7 @@ const STORAGE = 'grindlewald-sync-v1';
 export async function createSync({platform, getSettings, applySettings, executeFloodlights, onChange = () => {},
   load = async () => JSON.parse(localStorage.getItem(STORAGE) ?? 'null'),
   store = async value => localStorage.setItem(STORAGE, JSON.stringify(value)),
+  copy = text => navigator.clipboard.writeText(text),
 }) {
   const stored = await load() ?? {};
   let token=stored.token ?? '';
@@ -100,7 +101,10 @@ export async function createSync({platform, getSettings, applySettings, executeF
   }
   document.querySelector('#sync-create').onclick=()=>connect(false);
   document.querySelector('#sync-join').onclick=()=>connect(true);
-  document.querySelector('#sync-copy').onclick=()=>{code.select();navigator.clipboard.writeText(code.value).catch(()=>document.execCommand('copy'));};
+  document.querySelector('#sync-copy').onclick=async()=>{
+    try {await copy(code.value);status.textContent='Code copied';}
+    catch {status.textContent='Could not copy the code';}
+  };
   document.querySelector('#sync-disconnect').onclick=async()=>{token='';await persist();display();status.textContent='Sync off';};
   display();status.textContent=token?'Connecting…':'Pair once to share lights and presets';
   const schedule=()=>{clearTimeout(timer);timer=setTimeout(async()=>{await exchange();schedule();},platform==='macos'?5000:8000);};
