@@ -43,3 +43,12 @@ test("white breathing only appears when every enabled light is Classic (H6001)",
   assert.equal(whiteBreathingAvailable([h6001, { ...h6005, enabled: false }]), true);
   assert.equal(whiteBreathingAvailable([]), false);
 });
+
+test('cached white lookup preserves original positions and tie order', async () => {
+  const { whitePositionFromHex } = await import('../src/white-breathing.js');
+  const { whitePositionFromHex: baseline } = await import('../scripts/profile-baseline.mjs');
+  for (let color = 0; color <= 0xffffff; color += 4093) {
+    const hex = '#' + color.toString(16).padStart(6, '0');
+    assert.equal(whitePositionFromHex(hex), baseline(hex));
+  }
+});

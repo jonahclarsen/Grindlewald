@@ -183,23 +183,39 @@ pub fn white_at_kelvin(kelvin: u16) -> String {
 
 pub fn white_kelvin_from_hex(value: &str) -> Result<u16, String> {
     let target = crate::protocol::parse_hex_color(value)?;
-    Ok((2000..=9000)
-        .step_by(70)
-        .min_by_key(|kelvin| {
-            let candidate = crate::protocol::parse_hex_color(&white_at_kelvin(*kelvin)).unwrap();
+    static CANDIDATES: std::sync::OnceLock<[[u8; 3]; 101]> = std::sync::OnceLock::new();
+    let candidates = CANDIDATES.get_or_init(|| std::array::from_fn(|index| {
+        crate::protocol::parse_hex_color(&white_at_kelvin(2000 + index as u16 * 70)).unwrap()
+    }));
+    Ok(2000 + candidates.iter().enumerate()
+        .min_by_key(|(_, candidate)| {
             candidate
                 .iter()
                 .zip(target)
                 .map(|(a, b)| i32::from(*a).abs_diff(i32::from(b)).pow(2))
                 .sum::<u32>()
         })
-        .unwrap())
+        .unwrap().0 as u16 * 70)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::parse_hex_color;
+
+    #[test]
+    fn cached_white_lookup_matches_original() {
+        for color in (0..=0xffffff_u32).step_by(4093) {
+            let hex = format!("#{color:06x}");
+            let target = parse_hex_color(&hex).unwrap();
+            let original = (2000..=9000).step_by(70).min_by_key(|kelvin| {
+                parse_hex_color(&white_at_kelvin(*kelvin)).unwrap().iter().zip(target)
+                    .map(|(a, b)| i32::from(*a).abs_diff(i32::from(b)).pow(2)).sum::<u32>()
+            }).unwrap();
+            assert_eq!(white_kelvin_from_hex(&hex).unwrap(), original);
+        }
+    }
+
     use std::collections::HashSet;
 
     #[test]

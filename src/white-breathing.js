@@ -44,3 +44,24 @@ export function whiteBreathingAvailable(devices) {
   const enabled = devices.filter((device) => device.enabled);
   return enabled.length > 0 && enabled.every((device) => device.profile !== "h6005");
 }
+
+// Static RGB candidates avoid string generation and parsing during each repaint.
+const whiteCandidates = Array.from({ length: 101 }, (_, step) => {
+  const hex = whiteAtPosition(step / 100).slice(1);
+  return [0, 2, 4].map(offset => Number.parseInt(hex.slice(offset, offset + 2), 16));
+});
+
+export function whitePositionFromHex(value) {
+  const hex = value.replace("#", "");
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  let best = 0;
+  let distance = Infinity;
+  for (let step = 0; step < whiteCandidates.length; step++) {
+    const rgb = whiteCandidates[step];
+    const next = (rgb[0] - red) ** 2 + (rgb[1] - green) ** 2 + (rgb[2] - blue) ** 2;
+    if (next < distance) { distance = next; best = step; }
+  }
+  return best / 100;
+}

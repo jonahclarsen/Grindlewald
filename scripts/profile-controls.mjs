@@ -2,9 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { whiteAtPosition } from '../src/white-breathing.js';
-const source = readFileSync('src/app.js', 'utf8');
-const extract = (name) => source.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0];
-const legacy = new Function('whiteAtPosition', `${extract('hexToRgb')}\n${extract('whitePositionFromHex')}\nreturn whitePositionFromHex;`)(whiteAtPosition);
+import { whitePositionFromHex as legacy } from './profile-baseline.mjs';
 const optimized = (await import('../src/white-breathing.js')).whitePositionFromHex ?? legacy;
 const colors = Array.from({length: 4096}, (_, i) => '#' + ((i * 4093) % 0x1000000).toString(16).padStart(6, '0'));
 for (const color of colors) {

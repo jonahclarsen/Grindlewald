@@ -1,5 +1,5 @@
 import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
-import { kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
+import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
@@ -113,20 +113,6 @@ function colorAtHue(hue) {
   return rgbToHex(colors[Math.floor(sector) % 6]);
 }
 
-function whitePositionFromHex(value) {
-  const target = hexToRgb(value);
-  let bestPosition = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (let step = 0; step <= 100; step += 1) {
-    const candidate = hexToRgb(whiteAtPosition(step / 100));
-    const distance = candidate.reduce((sum, channel, index) => sum + (channel - target[index]) ** 2, 0);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestPosition = step / 100;
-    }
-  }
-  return bestPosition;
-}
 
 function paintHue(hue) {
   const normalizedHue = Math.max(0, Math.min(360, hue));
