@@ -19,7 +19,9 @@ object MobileBridge {
     private lateinit var activity: Activity
     fun attach(value: Activity) {
         activity = value
+        android.util.Log.i("GrindlewaldStartup", "Bluetooth bridge initializing")
         initialize()
+        android.util.Log.i("GrindlewaldStartup", "Bluetooth bridge ready")
         GrindlewaldUpdater.attach(value)
     }
     @JvmStatic fun action(action: String): String {
