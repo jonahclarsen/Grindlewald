@@ -65,7 +65,7 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_6
-          emulator-options: -no-window -gpu lavapipe -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -no-snapshot-save -gpu lavapipe -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash scripts/android-smoke.sh
       - uses: actions/upload-artifact@v4

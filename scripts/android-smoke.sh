@@ -4,7 +4,20 @@ PKG=com.jonahclarsen.grindlewald
 PORT=$(cat android/ci-update-port.txt)
 python3 -m http.server "$PORT" --bind 127.0.0.1 > /tmp/update-server.log 2>&1 &
 SERVER_PID=$!
-trap 'adb logcat -d > android-log.txt; adb exec-out screencap -p > android-screen.png; adb root; adb pull /data/anr android-anr || true; kill "$SERVER_PID" || true' EXIT
+cleanup() {
+  local cleanup_result=$?
+  trap - EXIT
+  adb logcat -d > android-log.txt || true
+  adb exec-out screencap -p > android-screen.png || true
+  if [ "$cleanup_result" != 0 ]; then
+    adb root || true
+    timeout 10 adb wait-for-device || true
+    adb pull /data/anr android-anr || true
+  fi
+  kill "$SERVER_PID" || true
+  exit "$cleanup_result"
+}
+trap cleanup EXIT
 adb reverse "tcp:$PORT" "tcp:$PORT"
 sleep 25
 adb logcat -c

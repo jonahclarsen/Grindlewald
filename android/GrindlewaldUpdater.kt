@@ -26,16 +26,18 @@ object GrindlewaldUpdater {
             Thread {
                 Thread.sleep(5000)
                 // A genuinely newer signed fixture, served by CI over the same download path.
-                install(context, "http://127.0.0.1:39920/update.apk", true)
+                check(context, true, true)
             }.start()
         }
     }
-    fun check(context: Context, manual: Boolean): String {
+    fun check(context: Context, manual: Boolean, selfTest: Boolean = false): String {
+        // Debug APKs use a different signing identity and cannot install production updates.
+        if (!selfTest && context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) return "Development build"
         val prefs = context.getSharedPreferences("updates", Context.MODE_PRIVATE)
         if (!manual && System.currentTimeMillis() - prefs.getLong("checked", 0) < 6 * 60 * 60 * 1000) return ""
         if (!busy.compareAndSet(false, true)) return "An update is already running"
         try {
-            val connection = URL(REPOSITORY).openConnection() as HttpURLConnection
+            val connection = URL(if (selfTest) "http://127.0.0.1:39920/scripts/android-update-fixture.json" else REPOSITORY).openConnection() as HttpURLConnection
             connection.connectTimeout = 15000; connection.readTimeout = 30000
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             val release = try {
@@ -53,8 +55,9 @@ object GrindlewaldUpdater {
             val assets = release.getJSONArray("assets")
             check((0 until assets.length()).any { assets.getJSONObject(it).getString("name") == APK }) { "The Android update is not ready yet" }
             busy.set(false)
-            return install(context, "$DOWNLOAD$tag/$APK", false)
+            return install(context, if (selfTest) "http://127.0.0.1:39920/update.apk" else "$DOWNLOAD$tag/$APK", selfTest)
         } catch (error: Exception) {
+            if (selfTest) Log.e("GrindlewaldUpdate", "UPDATE_E2E_FAIL", error)
             return error.message ?: "Could not check for updates"
         } finally { busy.set(false) }
     }
