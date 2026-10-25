@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {SyncModel,mergeRecords} from '../src/sync-model.js';
+import worker,{Room} from '../relay-worker/worker.js';
+const settings=()=>({devices:[{name:'Test lamp',identifier:'SYNTHETIC-MAC-ID',profile:'h6005',enabled:true}],presets:[{name:'Evening',mode:'color',value:'#ff0000',brightness:0.4}],schedules:[{shellCommand:'private-local-command'}]});
+let sequence=0;
+const model=(platform,stored)=>new SyncModel(platform,stored,()=>`test-${++sequence}`);
+test('pairing preserves local automation and cross-platform light addresses',()=>{
+ const desktop=model('macos'); desktop.capture(settings());
+ const phone=model('android'); phone.merge(desktop.state.records);
+ let mobile=phone.materialize({devices:[],presets:[],schedules:[]});
+ assert.match(mobile.devices[0].identifier,/^UNPAIRED-/);
+ mobile=phone.pair(mobile,mobile.devices[0].identifier,'SYNTHETIC-ANDROID-ID');
+ desktop.merge(phone.state.records);
+ const local=desktop.materialize(settings());
+ assert.equal(local.devices[0].identifier,'SYNTHETIC-MAC-ID');
+ assert.equal(local.schedules[0].shellCommand,'private-local-command');
+ assert.equal(mobile.devices[0].identifier,'SYNTHETIC-ANDROID-ID');
+ assert.ok(!JSON.stringify(desktop.state.records).includes('shellCommand'));
+});
+test('offline edits, deletes, retries and restart converge without resurrection',()=>{
+ const a=model('macos'); a.capture(settings());
+ const b=model('android'); b.merge(a.state.records); const bs=b.materialize({devices:[],presets:[]});
+ const as=a.materialize(settings()); as.presets=[]; a.capture(as);
+ bs.devices[0].name='Renamed'; b.capture(bs);
+ const restarted=model('macos',a.state); restarted.merge(b.state.records); b.merge(restarted.state.records);
+ assert.deepEqual(restarted.state.records,b.state.records);
+ assert.equal(b.materialize(bs).presets.length,0);
+ assert.equal(restarted.materialize(as).devices[0].name,'Renamed');
+ assert.deepEqual(mergeRecords(b.state.records,b.state.records),b.state.records);
+});
+test('relay exchanges two clients and rejects automations or unauthenticated requests',async()=>{
+ const values=new Map(); const storage={get:async k=>values.get(k),put:async(k,v)=>values.set(k,v),transaction:async fn=>fn(storage)};
+ const room=new Room({storage});const env={ROOMS:{idFromName:x=>x,get:()=>room}};
+ assert.equal((await worker.fetch(new Request('https://example.test/sync',{method:'POST'}),env)).status,401);
+ const a=model('macos');a.capture(settings());
+ const request=records=>new Request('https://example.test/sync',{method:'POST',headers:{Authorization:'Bearer '+'a'.repeat(64)},body:JSON.stringify({records})});
+ assert.equal((await worker.fetch(request(a.state.records),env)).status,200);
+ const response=await (await worker.fetch(request({}),env)).json();assert.deepEqual(response.records,a.state.records);
+ const invalid=structuredClone(a.state.records);Object.values(invalid)[0].value.shellCommand='no';
+ assert.equal((await worker.fetch(request(invalid),env)).status,400);
+});

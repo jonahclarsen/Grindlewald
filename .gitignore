@@ -13,3 +13,8 @@
 /devices.json
 /*.sock
 /*.plist.local
+
+/relay-worker/node_modules/
+/relay-worker/.wrangler/
+*.cpuprofile
+/control-profile.json
