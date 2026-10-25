@@ -34,6 +34,7 @@ jobs:
         with:
           workspaces: src-tauri
           key: android
+          cache-on-failure: true
       - run: |
           sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
@@ -104,7 +105,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
+      - name: Require verified source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 50 --json conclusion --jq 'any(.[]; .conclusion == "success")' | grep -qx true
       - uses: actions/download-artifact@v4
         with:
           name: android-release

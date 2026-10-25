@@ -201,3 +201,46 @@ No device identifier, credential, API key, user automation, or personal filesyst
 ## License
 
 [MIT](LICENSE)
+
+## Android and sync
+
+Install `grindlewald-arm64.apk` from [Releases](https://github.com/jonahclarsen/Grindlewald/releases).
+Android has Control and Settings only. It uses the same Rust Bluetooth packet encoder,
+connection pacing, presets, and effects as desktop. Allow **Nearby devices** when
+Discover or a light control first requests it (Location permission on Android 11 and older).
+Effects stream while the app is running; Android may suspend the process in the background.
+
+In Settings, choose **Create code**, copy it, then paste it into Settings on the other
+device and choose **Pair**. Lights and presets sync automatically after edits and on
+launch/resume. Offline edits are retained and merged on reconnection; deletions have
+tombstones so an offline device cannot restore them accidentally. Conflicting edits
+to the same record resolve deterministically. Colors currently selected, connection
+preferences, automations, shell commands, and helper approvals remain local.
+
+Bluetooth addresses differ between macOS and Android. On the new device, choose
+**Discover**, then **Pair [light name]** beside the matching nearby light. Each platform's
+address stays associated with that shared light. Android Floodlights buttons send
+requests to the paired Mac, which must be running Grindlewald; they use the Mac's
+existing floodlight script and credentials. Requests expire rather than running later
+when the Mac comes back online.
+
+The pairing code grants access to that room, including its configured Bluetooth
+identifiers and floodlight controls. Transport uses HTTPS; the relay is not end-to-end
+encrypted. Keep the code private. **Disconnect** stops syncing on that device without
+removing its lights. Create a new code and re-pair devices to move to a new room.
+No personal configuration, pairing code, or signing key is included in the repository.
+
+Android checks for updates on launch/resume, at most once per six hours, and has a
+**Check for updates** button. Android may ask to allow installs from Grindlewald and
+confirm an update; eligible later updates use PackageInstaller without a confirmation.
+Installation can close the app. Reopen it normally; settings are preserved.
+
+CI runs JavaScript and native regression tests, a synthetic before/after CPU profile,
+mobile/desktop browser journeys, and an Android emulator install/upgrade test. The
+upgrade test downloads a newer APK through the app's installer, checks the installed
+version and APK path changed, and verifies retained data. It cannot verify physical
+Bluetooth radio behavior against real lights.
+
+The daily workflow checks main at 11:43 UTC. It releases only a new, CI-verified commit,
+retries an unpublished tag after failures, and uses a persistent GitHub Actions signing
+identity. Builds and tests run on CI; no Android toolchain is required locally.

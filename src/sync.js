@@ -28,7 +28,7 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
   async function exchange() {
     if (!token || busy) return;
     // Do not replace an editor while someone is typing in it.
-    if (document.activeElement?.matches('input,select,textarea')) return;
+    if (document.hasFocus() && document.activeElement?.matches('input,select,textarea')) return;
     busy=true;
     try {
       capture();
