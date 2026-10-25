@@ -11,11 +11,7 @@ adb logcat -c
 adb install grindlewald-debug.apk
 adb shell am start -n "$PKG/.MainActivity"
 sleep 12
-adb shell uiautomator dump /sdcard/window.xml
-adb pull /sdcard/window.xml /tmp/window.xml
-# Verify actual WebView controls and absence of the automation tab.
-grep -E 'Control' /tmp/window.xml
-if grep -E 'text="Automations"' /tmp/window.xml; then exit 1; fi
+timeout 90 node scripts/android-webview.mjs prepare
 adb shell am force-stop "$PKG"
 adb shell run-as "$PKG" mkdir -p files
 printf retained | adb shell run-as "$PKG" tee files/update-retention.txt
@@ -30,7 +26,7 @@ for attempt in $(seq 1 60); do
     test "$(adb shell pm path "$PKG")" != "$BEFORE"
     adb shell run-as "$PKG" cat files/update-retention.txt | grep -E retained
     adb shell am start -n "$PKG/.MainActivity"
-    sleep 5
+    timeout 90 node scripts/android-webview.mjs verify
     if adb logcat -d | grep -E 'FATAL EXCEPTION|UPDATE_E2E_FAIL'; then exit 1; fi
     echo 'PASS: actual downloaded APK upgraded 0.1.0 to 0.1.1 and retained data'
     exit 0
