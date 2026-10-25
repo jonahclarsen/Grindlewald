@@ -934,7 +934,10 @@ document.addEventListener("change", async (event) => {
       const field = event.target.dataset.presetField;
       const oldName = preset.name;
       preset[field] = field === "brightness" ? Number(event.target.value) / 100 : event.target.value;
-      if (field === "name") settings.schedules.forEach((schedule) => { if (schedule.preset === oldName) schedule.preset = preset.name; });
+      if (field === "name") {
+        sync?.renamePreset(oldName, preset.name);
+        settings.schedules.forEach((schedule) => { if (schedule.preset === oldName) schedule.preset = preset.name; });
+      }
     }
     await save(); renderAll();
   }

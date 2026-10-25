@@ -100,6 +100,7 @@ export function createSync({platform, getSettings, applySettings, executeFloodli
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) exchange();});
   return {
     changed(){capture();},
+    renamePreset(oldName,name){if(token){model.renamePreset(oldName,name);persist();}},
     async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));persist();onChange();exchange();},
     async floodlights(args){
       const id=crypto.randomUUID();

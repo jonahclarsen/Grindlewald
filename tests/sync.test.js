@@ -66,3 +66,12 @@ test('deleting a duplicate offline addition does not reveal the hidden duplicate
  const merged=a.materialize(settings());assert.equal(merged.presets.length,1);
  merged.presets=[];a.capture(merged);assert.equal(a.materialize(merged).presets.length,0);
 });
+test('remote renames update local automation references without sharing automations',()=>{
+ const initial=settings();initial.schedules=[{preset:'Evening',lights:['Test lamp'],shellCommand:'private'}];
+ const desktop=model('macos');desktop.capture(initial);
+ const phone=model('android');phone.merge(desktop.state.records);const mobile=phone.materialize({devices:[],presets:[],schedules:[]});
+ phone.renamePreset('Evening','Night');mobile.presets[0].name='Night';mobile.devices[0].name='Room';phone.capture(mobile);
+ desktop.merge(phone.state.records);const updated=desktop.materialize(initial);
+ assert.deepEqual(updated.schedules,[{preset:'Night',lights:['Room'],shellCommand:'private'}]);
+ assert.ok(!JSON.stringify(phone.state.records).includes('shellCommand'));
+});

@@ -62,8 +62,32 @@ export class SyncModel {
     this.state.records = mergeRecords(this.state.records, records);
     this.state.clock = Math.max(this.state.clock, ...Object.values(records).map(record => record.clock));
   }
+  renamePreset(oldName, name) {
+    const id = this.state.ids.presets[oldName];
+    const record = this.state.records[id];
+    if (!record?.value || oldName === name) return;
+    this.write(id, 'presets', {...record.value, name});
+    delete this.state.ids.presets[oldName];
+    this.state.ids.presets[name] = id;
+    const previous = this.state.baseline.presets.find(preset => preset.name === oldName);
+    if (previous) previous.name = name;
+  }
   materialize(settings) {
+    const previousIds = this.state.ids;
     const result = {...settings, devices:[], presets:[]};
+    // Rewrite local automation references just as a rename in Settings does;
+    // automation contents never enter the shared records.
+    if (settings.schedules) result.schedules = settings.schedules.map(schedule => {
+      const presetId = previousIds.presets[schedule.preset];
+      const preset = presetId ? this.state.records[presetId] : undefined;
+      const lights = (schedule.lights ?? []).flatMap(name => {
+        const device = settings.devices.find(device => device.name === name);
+        const id = device && previousIds.devices[device.identifier];
+        const record = id ? this.state.records[id] : undefined;
+        return record ? (record.value ? [record.value.name] : []) : [name];
+      });
+      return {...schedule, ...(schedule.lights ? {lights} : {}), ...(preset ? {preset:preset.value?.name ?? ''} : {})};
+    });
     this.state.ids = {devices:{},presets:{}};
     for (const [id, record] of Object.entries(this.state.records).sort(([a],[b]) => a.localeCompare(b))) {
       if (!record.value) continue;
