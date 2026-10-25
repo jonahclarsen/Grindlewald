@@ -93,7 +93,7 @@ export class SyncModel {
       if (!record.value) continue;
       const value = record.kind === 'devices' ? {
         name:record.value.name, profile:record.value.profile, enabled:record.value.enabled,
-        identifier:record.value.addresses[this.platform] ?? `UNPAIRED-${id}`,
+        identifier:record.value.addresses[this.platform] ?? `UNPAIRED-${id.toUpperCase()}`,
       } : structuredClone(record.value);
       // Conflicting offline additions of the same name resolve deterministically.
       const existing = result[record.kind].findIndex(item => item.name === value.name);

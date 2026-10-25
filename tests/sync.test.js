@@ -75,3 +75,11 @@ test('remote renames update local automation references without sharing automati
  assert.deepEqual(updated.schedules,[{preset:'Night',lights:['Room'],shellCommand:'private'}]);
  assert.ok(!JSON.stringify(phone.state.records).includes('shellCommand'));
 });
+test('unpaired identifiers survive native uppercase normalization and restart',()=>{
+ const a=model('macos');a.capture(settings());const b=model('android');b.merge(a.state.records);
+ const mobile=b.materialize({devices:[],presets:[]});const count=Object.keys(b.state.records).length;
+ mobile.devices.forEach(device=>{device.identifier=device.identifier.toUpperCase();});
+ const restored=model('android',b.state);restored.capture(mobile);
+ assert.equal(Object.keys(restored.state.records).length,count);
+ assert.equal(restored.materialize(mobile).devices.length,1);
+});
