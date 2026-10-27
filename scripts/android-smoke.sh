@@ -22,6 +22,8 @@ adb reverse "tcp:$PORT" "tcp:$PORT"
 sleep 25
 adb logcat -c
 adb install grindlewald-debug.apk
+adb shell pm grant "$PKG" android.permission.BLUETOOTH_SCAN
+adb shell pm grant "$PKG" android.permission.BLUETOOTH_CONNECT
 adb shell am start -n "$PKG/.MainActivity"
 sleep 12
 timeout 90 node scripts/android-webview.mjs prepare

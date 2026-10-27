@@ -46,5 +46,9 @@ try {
  await until(`document.querySelector('#sync-status').textContent==='Synced'`);
  await evaluate(`document.querySelector('[data-page="controller-page"]').click()`);
  assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);
- console.log('PASS: Android Control/Settings, live sync, and native preset persistence');
+ // btleplug runs on async worker threads, which must stay attached to the JVM.
+ const discovery=await evaluate(`window.__TAURI__.core.invoke('discover_lights').then(lights=>'found '+lights.length,error=>'error: '+error)`);
+ console.log('Discover:',discovery);
+ assert.doesNotMatch(discovery,/JNI|Java exception/i);
+ console.log('PASS: Android Control/Settings, live sync, and native preset persistence, Bluetooth discovery');
 } finally {socket.close();adb('forward','--remove',`tcp:${port}`);}

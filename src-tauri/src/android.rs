@@ -1,11 +1,21 @@
 //! Android exposes lighting and settings only. No scheduler, shell, or helper commands.
 use crate::{ble::DiscoveredDevice, command::ControlCommand, settings::Settings, state::SharedState};
-use jni::{JNIEnv, JavaVM, objects::{GlobalRef, JClass, JString, JValue}};
-use std::sync::OnceLock;
+use jni::{JNIEnv, JavaVM, objects::{GlobalRef, JClass, JString, JValue}, sys::{jint, JNI_VERSION_1_6}};
+use std::{ffi::c_void, sync::OnceLock};
 use tauri::{Emitter, Manager};
 static VM: OnceLock<JavaVM> = OnceLock::new();
 static BRIDGE: OnceLock<GlobalRef> = OnceLock::new();
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
+// btleplug calls `get_env`, which fails with "JNI call failed" on threads not attached to the VM.
+#[unsafe(no_mangle)]
+pub extern "system" fn JNI_OnLoad(vm: *mut jni::sys::JavaVM, _: *mut c_void) -> jint {
+    if let Ok(vm) = unsafe { JavaVM::from_raw(vm) } { let _ = VM.set(vm); }
+    JNI_VERSION_1_6
+}
+fn attach_thread() {
+    if let Some(vm) = VM.get() { let _ = vm.attach_current_thread_permanently(); }
+}
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_jonahclarsen_grindlewald_MobileBridge_initialize(env: JNIEnv, class: JClass) {
     if let Err(error) = btleplug::platform::init(&env) {
@@ -63,6 +73,9 @@ async fn disconnect_lights(state: tauri::State<'_, SharedState>) -> Result<Strin
 fn copy_error_details(text: String) -> Result<(), String> { mobile_call("copy", &text).map(|_| ()) }
 #[tauri::mobile_entry_point]
 pub fn run() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all()
+        .on_thread_start(attach_thread).build().expect("error starting Grindlewald runtime");
+    tauri::async_runtime::set(RUNTIME.get_or_init(|| runtime).handle().clone());
     tauri::Builder::default().setup(|app| {
         let state = SharedState::new(app.path().app_config_dir()?.join("settings.json"));
         let mut frames = state.subscribe_breathing();
