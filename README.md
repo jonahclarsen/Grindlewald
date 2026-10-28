@@ -218,8 +218,10 @@ to the same record resolve deterministically. Colors currently selected, connect
 preferences, automations, shell commands, and helper approvals remain local.
 
 Bluetooth addresses differ between macOS and Android. On the new device, choose
-**Discover**, then **Pair [light name]** beside the matching nearby light. Each platform's
-address stays associated with that shared light. Android Floodlights buttons send
+**Discover**: a light synced from the other device pairs automatically, matched by the
+address suffix Govee lights advertise in their name (`…_1A2B`). **Pair [light name]** pairs
+manually. A light added separately on each device merges into one, keeping its custom
+name. Each platform's address stays associated with that shared light. Android Floodlights buttons send
 requests to the paired Mac, which must be running Grindlewald; they use the Mac's
 existing floodlight script and credentials. Hidden-window relay polling requires macOS 14 or newer; on older Macs keep the window open. Requests expire rather than running later
 when the Mac comes back online.

@@ -83,3 +83,38 @@ test('unpaired identifiers survive native uppercase normalization and restart',(
  assert.equal(Object.keys(restored.state.records).length,count);
  assert.equal(restored.materialize(mobile).devices.length,1);
 });
+test('one light added separately on each platform merges by its advertised address suffix',()=>{
+ const macSettings={devices:[{name:'ihoment_H6005_1A2B',identifier:'SYNTHETIC-MAC-UUID',profile:'h6005',enabled:true}],presets:[],schedules:[{lights:['ihoment_H6005_1A2B']}]};
+ const desktop=model('macos');desktop.capture(macSettings);
+ const phone=model('android');phone.capture({devices:[{name:'Room',identifier:'00:11:22:33:1A:2B',profile:'h6005',enabled:false}],presets:[]});
+ desktop.merge(phone.state.records);phone.merge(desktop.state.records);
+ desktop.combineDuplicates();phone.combineDuplicates();
+ desktop.merge(phone.state.records);phone.merge(desktop.state.records);
+ assert.deepEqual(desktop.state.records,phone.state.records);
+ const mac=desktop.materialize(macSettings),android=phone.materialize({devices:[],presets:[]});
+ assert.deepEqual(mac.devices,[{name:'Room',profile:'h6005',enabled:true,identifier:'SYNTHETIC-MAC-UUID'}]);
+ assert.deepEqual(android.devices,[{name:'Room',profile:'h6005',enabled:true,identifier:'00:11:22:33:1A:2B'}]);
+ assert.deepEqual(mac.schedules,[{lights:['Room']}]);
+ assert.equal(desktop.combineDuplicates(),false);
+});
+test('discovery pairs a renamed light synced from the other platform',()=>{
+ const desktop=model('macos');const local={devices:[{name:'Desk',identifier:'SYNTHETIC-MAC-UUID',profile:'h6005',enabled:true}],presets:[]};
+ desktop.capture(local);desktop.materialize(local);
+ assert.equal(desktop.observe([{name:'ihoment_H6005_1A2B',identifier:'SYNTHETIC-MAC-UUID'}]),true);
+ const phone=model('android');phone.merge(desktop.state.records);phone.materialize({devices:[],presets:[]});
+ assert.equal(phone.observe([{name:'ihoment_H6005_FFFF',identifier:'00:11:22:33:FF:FF'},{name:'ihoment_H6005_1A2B',identifier:'00:11:22:33:1A:2B'}]),true);
+ assert.deepEqual(phone.materialize({devices:[],presets:[]}).devices,[{name:'Desk',profile:'h6005',enabled:true,identifier:'00:11:22:33:1A:2B'}]);
+});
+test('different lights sharing an address suffix on one platform stay separate',()=>{
+ const a=model('android');a.capture({devices:[{name:'One',identifier:'00:11:22:33:1A:2B',profile:'h6005',enabled:true},{name:'Two',identifier:'99:11:22:33:1A:2B',profile:'h6005',enabled:true}],presets:[]});
+ assert.equal(a.combineDuplicates(),false);
+ assert.equal(a.materialize({devices:[],presets:[]}).devices.length,2);
+});
+test('relay accepts hardware hints and merge tombstones only in their expected shape',async()=>{
+ const {validRecord}=await import('../relay-worker/worker.js');
+ const value={name:'Room',profile:'h6005',enabled:true,addresses:{android:'00:11:22:33:1A:2B'}};
+ assert.ok(validRecord('a',{kind:'devices',clock:1,actor:'x',value:{...value,hint:'1A2B'}}));
+ assert.ok(!validRecord('a',{kind:'devices',clock:1,actor:'x',value:{...value,hint:'<script>'}}));
+ assert.ok(validRecord('a',{kind:'devices',clock:1,actor:'x',value:null,mergedInto:'b'}));
+ assert.ok(!validRecord('a',{kind:'devices',clock:1,actor:'x',value:null,mergedInto:'../b'}));
+});

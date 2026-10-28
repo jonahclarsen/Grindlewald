@@ -30,6 +30,7 @@ export async function createSync({platform, getSettings, applySettings, executeF
   };
   const capture=async()=>{ if (token) {model.capture(getSettings());await persist();} };
   const apply=async()=>{
+    model.combineDuplicates();
     const before=getSettings(); const next=model.materialize(before);
     if (JSON.stringify([before.devices,before.presets]) !== JSON.stringify([next.devices,next.presets])) {
       await applySettings(next); onChange();
@@ -115,6 +116,7 @@ export async function createSync({platform, getSettings, applySettings, executeF
   return {
     changed(){return capture();},
     renamePreset(oldName,name){if(token)model.renamePreset(oldName,name);},
+    async observe(discovered){if(!token)return;await capture();if(model.observe(discovered)){await apply();exchange();}},
     async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));await persist();onChange();exchange();},
     async floodlights(args){
       const id=crypto.randomUUID();

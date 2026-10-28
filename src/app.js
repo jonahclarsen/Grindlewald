@@ -1156,6 +1156,7 @@ $("#discover-button").addEventListener("click", async () => {
       ...device,
       identifier: canonicalIdentifier(device.identifier),
     }));
+    await sync?.observe(discovered);
     const existingCount = discovered.filter(configuredDeviceFor).length;
     renderDevices();
     setStatus(discovered.length

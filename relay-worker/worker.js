@@ -5,10 +5,10 @@ export function validRecord(id, record) {
   if (!/^[a-zA-Z0-9-]{1,80}$/.test(id) || !record || !Number.isSafeInteger(record.clock) || record.clock < 1 || !/^[a-zA-Z0-9-]{1,80}$/.test(record.actor)) return false;
   if (!['devices','presets'].includes(record.kind)) return false;
   const value = record.value;
-  if (value === null) return true;
+  if (value === null) return record.mergedInto === undefined || /^[a-zA-Z0-9-]{1,80}$/.test(record.mergedInto);
   if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 100) return false;
   if (record.kind === 'presets') return ['color','white'].includes(value.mode) && /^#[0-9a-f]{6}$/i.test(value.value) && Number.isFinite(value.brightness) && value.brightness >= 0 && value.brightness <= 1 && Object.keys(value).every(k => ['name','mode','value','brightness'].includes(k));
-  return ['classic','h6005'].includes(value.profile) && typeof value.enabled === 'boolean' && value.addresses && Object.entries(value.addresses).every(([platform,address]) => ['macos','android'].includes(platform) && typeof address === 'string' && /^[a-zA-Z0-9:-]{1,100}$/.test(address)) && Object.keys(value).every(k => ['name','profile','enabled','addresses'].includes(k));
+  return ['classic','h6005'].includes(value.profile) && typeof value.enabled === 'boolean' && value.addresses && Object.entries(value.addresses).every(([platform,address]) => ['macos','android'].includes(platform) && typeof address === 'string' && /^[a-zA-Z0-9:-]{1,100}$/.test(address)) && (value.hint === undefined || /^[0-9A-F]{4}$/.test(value.hint)) && Object.keys(value).every(k => ['name','profile','enabled','addresses','hint'].includes(k));
 }
 export class Room {
   constructor(state) { this.storage=state.storage; }
