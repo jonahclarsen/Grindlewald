@@ -599,13 +599,12 @@ function renderDevices() {
   $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => {
     const editorKey = `device:${index}`;
     if (expandedEditorKey !== editorKey) {
-      return `<button class="compact-editor-card" data-expand-editor="${editorKey}"><span class="enabled-dot ${device.enabled ? "" : "off"}"></span><span class="summary-copy"><strong>${escapeHtml(device.name)}</strong><small>${device.profile === "h6005" ? "H6005" : "Classic (H6001)"} · ${device.identifier.startsWith("UNPAIRED-") ? "Pair on this device" : escapeHtml(canonicalIdentifier(device.identifier))}</small></span><svg class="disclosure ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>`;
+      return `<div class="light-tile" data-device-index="${index}"><button class="light-tile-open" data-expand-editor="${editorKey}"><strong>${escapeHtml(device.name)}</strong><small>${device.identifier.startsWith("UNPAIRED-") ? "Unpaired" : device.profile === "h6005" ? "H6005" : "H6001"}</small></button><input type="checkbox" data-device-field="enabled" aria-label="${escapeHtml(device.name)} enabled" ${device.enabled ? "checked" : ""}></div>`;
     }
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
-      <div class="card-title collapsible-card-title" data-collapse-editor-header><label class="inline"><input type="checkbox" data-device-field="enabled" ${device.enabled ? "checked" : ""}><strong>${escapeHtml(device.name)}</strong></label><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
+      <div class="card-title collapsible-card-title" data-collapse-editor-header><span class="inline"><input type="checkbox" data-device-field="enabled" aria-label="Enabled" ${device.enabled ? "checked" : ""}><input class="device-name-input" data-device-field="name" value="${escapeHtml(device.name)}" aria-label="Name" spellcheck="false"></span><span><button class="remove-button" data-remove-device="${index}">Remove</button><button class="collapse-button" data-collapse-editor aria-label="Collapse light"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></span></div>
       <div class="field-grid">
-        <label class="field">Name<input data-device-field="name" value="${escapeHtml(device.name)}"></label>
         <label class="field">Protocol<select data-device-field="profile"><option value="classic" ${device.profile === "classic" ? "selected" : ""}>Classic (H6001)</option><option value="h6005" ${device.profile === "h6005" ? "selected" : ""}>H6005</option></select></label>
         <label class="field full">Bluetooth identifier<input class="identifier-input" data-device-field="identifier" value="${escapeHtml(canonicalIdentifier(device.identifier))}" spellcheck="false"></label>
       </div>
@@ -742,7 +741,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
   const clickedEditor = event.target.closest("[data-editor-key]");
-  if (expandedEditorKey && clickedEditor?.dataset.editorKey !== expandedEditorKey) {
+  // Re-rendering here would detach a tile's switch before its change event reaches the document.
+  if (expandedEditorKey && clickedEditor?.dataset.editorKey !== expandedEditorKey && !event.target.closest(".light-tile input")) {
     expandedEditorKey = null;
     renderPresets();
     renderDevices();

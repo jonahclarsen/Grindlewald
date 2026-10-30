@@ -1055,7 +1055,50 @@ input[data-device-field="enabled"],
 .service-remove { justify-self: start; margin: -4px 7px 8px; padding: 3px 5px; color: var(--red); font-size: 12px; }
 .service-remove:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
 
+/* Configured lights: three tiles per row, switchable without expanding. */
+#device-editor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+#device-editor > * + * { margin-top: 0; }
+#device-editor > :is(.expanded-editor, .empty) { grid-column: 1 / -1; }
+.light-tile {
+  position: relative;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--tile);
+  box-shadow: var(--tile-shadow);
+}
+.light-tile:hover { background: var(--tile-hover); }
+.light-tile-open {
+  display: block;
+  width: 100%;
+  padding: 8px 12px 9px;
+  border: 0;
+  background: none;
+  color: var(--label);
+  text-align: left;
+}
+.light-tile-open :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.light-tile-open strong { font-size: 13px; font-weight: 500; }
+.light-tile-open small { margin-top: 4px; padding-right: 40px; color: var(--secondary); font-size: 11px; line-height: 19px; }
+.light-tile input { position: absolute; right: 10px; bottom: 9px; }
+.card-title .inline:has(.device-name-input) { flex: 1; min-width: 0; }
+.device-name-input { flex: 1; min-width: 0; margin-left: -1px; padding: 3px 5px; border: 0; border-radius: 6px; background: none; color: var(--label); font-size: 13px; font-weight: 500; outline: none; }
+.device-name-input:hover { background: var(--fill); }
+.device-name-input:focus { background: var(--field); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.light-tile:has(input:not(:checked)) .light-tile-open strong { color: var(--secondary); }
+
+/* Sync and Android: a status row, then padded controls, then a footnote. */
+.sync-card .card-title { padding-right: 12px; }
+.sync-card .card-title strong { font-weight: 500; }
+.sync-card .card-title small:empty { display: none; }
+.sync-body { display: grid; gap: 10px; padding: 12px; border-top: 1px solid var(--separator); }
+#sync-code { width: 100%; height: 28px; padding: 0 9px; border: 0; border-radius: 7px; background: var(--fill); color: var(--label); font-family: var(--mono); font-size: 12px; outline: none; }
+#sync-code:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
+.sync-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sync-actions .primary { margin-left: auto; }
+.sync-card > .page-copy { margin: 0; padding: 9px 12px 11px; border-top: 1px solid var(--separator); line-height: 1.45; }
+
 #discovered-devices .card-title { min-height: 50px; }
+#discovered-devices .sync-actions:not(:empty) { padding: 0 12px 12px; }
 .already-added { margin-top: 2px; color: var(--green); font-size: 11px; }
 .discovery-progress {
   gap: 9px;

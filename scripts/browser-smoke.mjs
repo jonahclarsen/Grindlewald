@@ -81,7 +81,9 @@ try {
  await phone.locator('#device-editor').filter({hasText:'CI light'}).waitFor();
  await phone.locator('#discover-button').click();
  await phone.locator('[data-pair-light]').click();
- await phone.locator('#device-editor').filter({hasText:'SYNTHETIC-ANDROID'}).waitFor();
+ await phone.locator('#device-editor .light-tile').filter({hasText:'H6005'}).waitFor();
+ await phone.locator('#device-editor [data-expand-editor]').first().click();
+ await phone.waitForFunction(()=>document.querySelector('[data-device-field="identifier"]')?.value==='SYNTHETIC-ANDROID');
  await phone.context().setOffline(true);
  await phone.locator('#add-preset').click();
  await phone.locator('#preset-editor [data-expand-editor]').last().click();
@@ -92,7 +94,8 @@ try {
  await desktop.locator('#preset-editor').filter({hasText:'Offline palette'}).waitFor({timeout:30000});
  await desktop.reload();
  await desktop.locator('[data-page="settings-page"]').click();
- await desktop.locator('#device-editor').filter({hasText:'SYNTHETIC-DESKTOP'}).waitFor();
+ await desktop.locator('#device-editor [data-expand-editor]').first().click();
+ await desktop.waitForFunction(()=>document.querySelector('[data-device-field="identifier"]')?.value==='SYNTHETIC-DESKTOP');
  await desktop.locator('#preset-editor').filter({hasText:'Offline palette'}).waitFor();
  await desktop.locator('[data-page="controller-page"]').click();
  await phone.locator('[data-floodlights="true"]:not([data-floodlights-off-after])').click();

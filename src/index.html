@@ -137,17 +137,21 @@
         <div class="section-heading"><h3>Configured lights</h3></div>
         <div id="device-editor" class="stack"></div>
 
-        <div class="editor-card">
-          <h3>Sync</h3>
-          <p id="sync-status" role="status"></p>
-          <input id="sync-code" type="password" autocomplete="off" spellcheck="false" aria-label="Pairing code" placeholder="Pairing code">
-          <div class="sync-actions"><button id="sync-create" class="secondary">Create code</button><button id="sync-copy" class="secondary">Copy</button><button id="sync-join" class="primary">Pair</button><button id="sync-disconnect" class="text-button" hidden>Disconnect</button></div>
-          <small class="muted">Paste this code on your other device. Anyone with it can access your lights and presets.</small>
+        <div class="section-heading settings-heading"><div><span class="eyebrow">Devices</span><h3>Sync</h3></div></div>
+        <div class="editor-card sync-card">
+          <div class="card-title"><span><strong id="sync-status" role="status"></strong></span><button id="sync-disconnect" class="remove-button" hidden>Disconnect</button></div>
+          <div class="sync-body">
+            <input id="sync-code" type="password" autocomplete="off" spellcheck="false" aria-label="Pairing code" placeholder="Pairing code">
+            <div class="sync-actions"><button id="sync-create" class="secondary compact">Create code</button><button id="sync-copy" class="secondary compact">Copy</button><button id="sync-join" class="primary compact">Pair</button></div>
+          </div>
+          <p class="page-copy">Anyone with this code can access your lights and presets.</p>
         </div>
-        <div id="mobile-settings" hidden class="editor-card">
-          <h3>Android</h3>
-          <div class="power-row"><button id="mobile-permissions" class="secondary">Permissions</button><button id="mobile-update" class="primary">Check for updates</button></div>
-          <p id="mobile-version" class="muted"></p><p id="mobile-update-status" role="status"></p>
+        <div id="mobile-settings" hidden>
+          <div class="section-heading settings-heading"><div><span class="eyebrow">App</span><h3>Android</h3></div></div>
+          <div class="editor-card sync-card">
+            <div class="card-title"><span><strong id="mobile-version"></strong><small id="mobile-update-status" class="muted" role="status"></small></span></div>
+            <div class="sync-body"><div class="sync-actions"><button id="mobile-permissions" class="secondary compact">Permissions</button><button id="mobile-update" class="primary compact">Check for updates</button></div></div>
+          </div>
         </div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
