@@ -1070,6 +1070,9 @@ input[data-device-field="enabled"],
   box-shadow: var(--tile-shadow);
 }
 .light-tile:hover { background: var(--tile-hover); }
+.light-tile { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.light-tile.dragging { position: relative; z-index: 2; background: var(--tile-hover); box-shadow: 0 8px 24px rgba(0, 0, 0, .18), 0 1px 4px rgba(0, 0, 0, .1); }
+#device-editor.sorting, #device-editor.sorting * { cursor: grabbing; }
 /* The switch fills the tile's height, inset as far as from the left edge. */
 .light-tile input[data-device-field="enabled"] {
   width: 54px;

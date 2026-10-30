@@ -39,11 +39,11 @@ export class SyncModel {
     this.state.records[id] = {kind, value, clock:++this.state.clock, actor:this.state.actor, ...extra};
   }
   // Follows lights combined into another record so local references survive.
-  resolve(id) {
-    let record = this.state.records[id];
-    for (let hops = 0; record && !record.value && record.mergedInto && hops < 8; hops++) record = this.state.records[record.mergedInto];
-    return record;
+  resolveId(id) {
+    for (let hops = 0; this.state.records[id] && !this.state.records[id].value && this.state.records[id].mergedInto && hops < 8; hops++) id = this.state.records[id].mergedInto;
+    return id;
   }
+  resolve(id) { return this.state.records[this.resolveId(id)]; }
   capture(settings) {
     for (const kind of ['devices', 'presets']) {
       const previous = this.state.baseline[kind];
@@ -120,6 +120,10 @@ export class SyncModel {
       result[record.kind].push(value);
       this.state.ids[record.kind][key(record.kind,value)] = id;
     }
+    // Light order is per platform: each keeps its own arrangement and appends new lights.
+    const rank = new Map(settings.devices.map((device, index) => [this.resolveId(previousIds.devices[device.identifier]), index]));
+    const rankOf = device => rank.get(this.state.ids.devices[device.identifier]) ?? Infinity;
+    result.devices.sort((a, b) => rankOf(a) - rankOf(b));
     this.state.baseline = {devices:structuredClone(result.devices),presets:structuredClone(result.presets)};
     return result;
   }

@@ -118,3 +118,18 @@ test('relay accepts hardware hints and merge tombstones only in their expected s
  assert.ok(validRecord('a',{kind:'devices',clock:1,actor:'x',value:null,mergedInto:'b'}));
  assert.ok(!validRecord('a',{kind:'devices',clock:1,actor:'x',value:null,mergedInto:'../b'}));
 });
+test('each platform keeps its own light order through sync',()=>{
+ const lights=names=>({devices:names.map(name=>({name,identifier:`SYNTHETIC-${name}`,profile:'h6005',enabled:true})),presets:[],schedules:[]});
+ const desktop=model('macos'); desktop.capture(lights(['A','B','C']));
+ const phone=model('android'); phone.merge(desktop.state.records);
+ let mobile=phone.materialize({devices:[],presets:[],schedules:[]});
+ mobile={...mobile,devices:[mobile.devices[2],mobile.devices[0],mobile.devices[1]]};
+ phone.capture(mobile);
+ assert.deepEqual(phone.materialize(mobile).devices.map(device=>device.name),['C','A','B']);
+ const reordered=lights(['B','A','C']);
+ desktop.capture(reordered); desktop.capture(lights(['B','A','C','D']));
+ desktop.merge(phone.state.records);
+ assert.deepEqual(desktop.materialize(lights(['B','A','C','D'])).devices.map(device=>device.name),['B','A','C','D']);
+ phone.merge(desktop.state.records);
+ assert.deepEqual(phone.materialize(mobile).devices.map(device=>device.name),['C','A','B','D']);
+});

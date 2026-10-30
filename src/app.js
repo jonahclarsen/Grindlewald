@@ -5,6 +5,7 @@ import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackP
 import { createControlQueue } from "./controls.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
+import { makeSortable } from "./sortable.js";
 import { createErrorPanel, createStatusReporter, summarizeError } from "./errors.js";
 import { defaultRunOnUseAfter, disableScheduleFor, isScheduleEnabled, runOnUseError, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
@@ -1169,6 +1170,17 @@ $("#add-schedule").addEventListener("click", async () => {
   automationEditors.expandedIds.add(settings.schedules.at(-1).id);
   await save(); renderSchedules();
 });
+makeSortable($("#device-editor"), {
+  itemSelector: ".light-tile",
+  ignoreSelector: "input",
+  onSort: async (tiles) => {
+    const expanded = expandedEditorKey?.startsWith("device:") ? settings.devices[Number(expandedEditorKey.slice(7))] : null;
+    settings.devices = tiles.map((tile) => settings.devices[Number(tile.dataset.deviceIndex)]);
+    if (expanded) expandedEditorKey = `device:${settings.devices.indexOf(expanded)}`;
+    await save(); renderAll();
+  },
+});
+
 $("#discover-button").addEventListener("click", async () => {
   setStatus("Scanning for Govee lights…", "busy");
   setDiscoveryBusy(true);
