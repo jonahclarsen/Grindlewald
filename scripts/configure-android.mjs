@@ -49,9 +49,8 @@ writeFileSync(gradle, text);
 const registry = join(process.env.HOME, '.cargo/registry/src');
 let ble;
 for (const dir of readdirSync(registry)) {
-  if (readdirSync(join(registry, dir)).includes('btleplug-0.11.8')) ble = join(registry, dir, 'btleplug-0.11.8/src/droidplug/java/src/main/java');
+  if (readdirSync(join(registry, dir)).includes('btleplug-0.13.5')) ble = join(registry, dir, 'btleplug-0.13.5/src/droidplug/java/src/main/java');
 }
 if (!ble) throw Error('Run cargo fetch before configuring Android');
 cpSync(ble, `${main}/java`, {recursive:true});
-cpSync('/tmp/jni-utils/java/src/main/java', `${main}/java`, {recursive:true});
 writeFileSync(`${root}/app/proguard-rules.pro`, readFileSync(`${root}/app/proguard-rules.pro`, 'utf8') + '\n-keep class com.nonpolynomial.** { *; }\n-keep class io.github.gedgygedgy.** { *; }\n-keep class com.jonahclarsen.grindlewald.MobileBridge { *; }\n');

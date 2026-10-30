@@ -39,8 +39,6 @@ jobs:
           sdkmanager 'ndk;27.2.12479018' 'platforms;android-35' 'build-tools;35.0.0'
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
-          git clone https://github.com/deviceplug/jni-utils-rs.git /tmp/jni-utils
-          git -C /tmp/jni-utils checkout 1737fd69e8d980ec045df6daafef250f2dd07ebd
       - run: pnpm tauri android init --ci
       - run: node scripts/configure-android.mjs
       - run: pnpm tauri android build --apk --debug --target x86_64

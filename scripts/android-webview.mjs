@@ -46,7 +46,7 @@ try {
  await until(`document.querySelector('#sync-status').textContent==='Synced'`);
  await evaluate(`document.querySelector('[data-page="controller-page"]').click()`);
  assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);
- // btleplug runs on async worker threads, which must stay attached to the JVM.
+ // btleplug calls Java from async worker threads.
  const discovery=await evaluate(`window.__TAURI__.core.invoke('discover_lights').then(lights=>'found '+lights.length,error=>'error: '+error)`);
  console.log('Discover:',discovery);
  assert.doesNotMatch(discovery,/JNI|Java exception/i);

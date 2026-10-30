@@ -1,43 +1,33 @@
 //! Android exposes lighting and settings only. No scheduler, shell, or helper commands.
 use crate::{ble::DiscoveredDevice, command::ControlCommand, settings::Settings, state::SharedState};
-use jni::{JNIEnv, JavaVM, objects::{GlobalRef, JClass, JString, JValue}, sys::{jint, JNI_VERSION_1_6}};
-use std::{ffi::c_void, sync::OnceLock};
+use jni::{EnvUnowned, JavaVM, errors::{Error, ThrowRuntimeExAndDefault}, jni_sig, jni_str,
+    objects::{Global, JClass, JString, JValue}, strings::JNIString};
+use std::sync::OnceLock;
 use tauri::{Emitter, Manager};
-static VM: OnceLock<JavaVM> = OnceLock::new();
-static BRIDGE: OnceLock<GlobalRef> = OnceLock::new();
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static BRIDGE: OnceLock<Global<JClass<'static>>> = OnceLock::new();
 
-// btleplug calls `get_env`, which fails with "JNI call failed" on threads not attached to the VM.
 #[unsafe(no_mangle)]
-pub extern "system" fn JNI_OnLoad(vm: *mut jni::sys::JavaVM, _: *mut c_void) -> jint {
-    if let Ok(vm) = unsafe { JavaVM::from_raw(vm) } { let _ = VM.set(vm); }
-    JNI_VERSION_1_6
-}
-fn attach_thread() {
-    if let Some(vm) = VM.get() { let _ = vm.attach_current_thread_permanently(); }
-}
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_jonahclarsen_grindlewald_MobileBridge_initialize(env: JNIEnv, class: JClass) {
-    if let Err(error) = btleplug::platform::init(&env) {
-        let _ = env.throw_new("java/lang/IllegalStateException", error.to_string());
-        return;
-    }
-    if let Ok(vm) = env.get_java_vm() { let _ = VM.set(vm); }
-    if let Ok(class) = env.new_global_ref(class) { let _ = BRIDGE.set(class); }
+pub extern "system" fn Java_com_jonahclarsen_grindlewald_MobileBridge_initialize<'local>(mut env: EnvUnowned<'local>, class: JClass<'local>) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        if let Err(error) = btleplug::platform::init(env) {
+            return env.throw_new(jni_str!("java/lang/IllegalStateException"), JNIString::from(error.to_string()));
+        }
+        let _ = BRIDGE.set(env.new_global_ref(class)?);
+        Ok(())
+    }).resolve::<ThrowRuntimeExAndDefault>()
 }
 fn mobile_call(method: &str, argument: &str) -> Result<String, String> {
-    let vm = VM.get().ok_or("Android is still starting")?;
-    let env = vm.attach_current_thread().map_err(|e| e.to_string())?;
     let class = BRIDGE.get().ok_or("Android is still starting")?;
-    let argument = env.new_string(argument).map_err(|e| e.to_string())?;
-    let result = env.call_static_method(JClass::from(class.as_obj()), method,
-        "(Ljava/lang/String;)Ljava/lang/String;", &[JValue::Object(argument.into())]);
-    if env.exception_check().unwrap_or(false) {
-        let _ = env.exception_clear();
-        return Err("Android could not complete the request".into());
-    }
-    let value = result.and_then(|v| v.l()).map_err(|e| e.to_string())?;
-    env.get_string(JString::from(value)).map(String::from).map_err(|e| e.to_string())
+    let vm = JavaVM::singleton().map_err(|e| e.to_string())?;
+    vm.attach_current_thread(|env| -> jni::errors::Result<String> {
+        let argument = env.new_string(argument)?;
+        let value = env.call_static_method(class, JNIString::from(method),
+            jni_sig!("(Ljava/lang/String;)Ljava/lang/String;"), &[JValue::Object(&argument)])?.l()?;
+        env.cast_local::<JString>(value)?.try_to_string(env)
+    }).map_err(|e| match e {
+        Error::JavaException | Error::CaughtJavaException { .. } => "Android could not complete the request".into(),
+        e => e.to_string(),
+    })
 }
 #[tauri::command]
 async fn mobile_action(action: String) -> Result<String, String> {
@@ -73,9 +63,6 @@ async fn disconnect_lights(state: tauri::State<'_, SharedState>) -> Result<Strin
 fn copy_error_details(text: String) -> Result<(), String> { mobile_call("copy", &text).map(|_| ()) }
 #[tauri::mobile_entry_point]
 pub fn run() {
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all()
-        .on_thread_start(attach_thread).build().expect("error starting Grindlewald runtime");
-    tauri::async_runtime::set(RUNTIME.get_or_init(|| runtime).handle().clone());
     tauri::Builder::default().setup(|app| {
         let state = SharedState::new(app.path().app_config_dir()?.join("settings.json"));
         let mut frames = state.subscribe_breathing();

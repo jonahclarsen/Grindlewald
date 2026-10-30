@@ -24,7 +24,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 anyhow = "1.0"
-btleplug = "=0.11.8"
+btleplug = "=0.13.5"
 clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["clock"] }
 dirs = "6.0"
@@ -47,4 +47,4 @@ tempfile = "3.21"
 tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon", "image-png"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.19"
+jni = "0.22"
