@@ -1060,28 +1060,38 @@ input[data-device-field="enabled"],
 #device-editor > * + * { margin-top: 0; }
 #device-editor > :is(.expanded-editor, .empty) { grid-column: 1 / -1; }
 .light-tile {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  padding: 7px 0 7px 7px;
   border-radius: 12px;
   background: var(--tile);
   box-shadow: var(--tile-shadow);
 }
 .light-tile:hover { background: var(--tile-hover); }
+/* The switch fills the tile's height, inset as far as from the left edge. */
+.light-tile input[data-device-field="enabled"] {
+  width: 54px;
+  height: 32px;
+  background-size: 28px 28px;
+}
 .light-tile-open {
-  display: block;
-  width: 100%;
-  padding: 8px 12px 9px;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  margin: -7px 0;
+  padding: 7px 10px 7px 0;
   border: 0;
   background: none;
   color: var(--label);
   text-align: left;
 }
 .light-tile-open :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.light-tile-open strong { font-size: 13px; font-weight: 500; }
-.light-tile-open small { margin-top: 4px; padding-right: 40px; color: var(--secondary); font-size: 11px; line-height: 19px; }
-.light-tile input { position: absolute; right: 10px; bottom: 9px; }
-.card-title .inline:has(.device-name-input) { flex: 1; min-width: 0; }
-.device-name-input { flex: 1; min-width: 0; margin-left: -1px; padding: 3px 5px; border: 0; border-radius: 6px; background: none; color: var(--label); font-size: 13px; font-weight: 500; outline: none; }
+.light-tile-open strong { font-size: 13px; font-weight: 500; line-height: 16px; }
+.light-tile-open small { margin-top: 1px; color: var(--secondary); font-size: 11px; line-height: 14px; }
+.card-title .inline:has(.device-name-input) { min-width: 0; }
+.device-name-input { min-width: 0; max-width: 100%; margin-left: -1px; padding: 3px 5px; border: 0; border-radius: 6px; background: none; color: var(--label); font-size: 13px; font-weight: 500; outline: none; }
 .device-name-input:hover { background: var(--fill); }
 .device-name-input:focus { background: var(--field); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .light-tile:has(input:not(:checked)) .light-tile-open strong { color: var(--secondary); }

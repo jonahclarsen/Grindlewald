@@ -599,7 +599,7 @@ function renderDevices() {
   $("#device-editor").innerHTML = settings.devices.length ? settings.devices.map((device, index) => {
     const editorKey = `device:${index}`;
     if (expandedEditorKey !== editorKey) {
-      return `<div class="light-tile" data-device-index="${index}"><button class="light-tile-open" data-expand-editor="${editorKey}"><strong>${escapeHtml(device.name)}</strong><small>${device.identifier.startsWith("UNPAIRED-") ? "Unpaired" : device.profile === "h6005" ? "H6005" : "H6001"}</small></button><input type="checkbox" data-device-field="enabled" aria-label="${escapeHtml(device.name)} enabled" ${device.enabled ? "checked" : ""}></div>`;
+      return `<div class="light-tile" data-device-index="${index}"><input type="checkbox" data-device-field="enabled" aria-label="${escapeHtml(device.name)} enabled" ${device.enabled ? "checked" : ""}><button class="light-tile-open" data-expand-editor="${editorKey}"><strong>${escapeHtml(device.name)}</strong><small>${device.identifier.startsWith("UNPAIRED-") ? "Unpaired" : device.profile === "h6005" ? "H6005" : "H6001"}</small></button></div>`;
     }
     return `
     <article class="editor-card expanded-editor" data-editor-key="${editorKey}" data-device-index="${index}">
@@ -610,6 +610,7 @@ function renderDevices() {
       </div>
     </article>`;
   }).join("") : '<div class="empty">No lights connected.</div>';
+  document.querySelectorAll(".device-name-input").forEach(sizeNameInput);
 
   $("#discovered-devices").innerHTML = discovered.map((device, index) => {
     const configuredDevice = configuredDeviceFor(device);
@@ -668,7 +669,7 @@ function uniqueId() {
   return globalThis.crypto?.randomUUID?.() || `schedule-${Date.now()}`;
 }
 
-function sizeScheduleNameInput(input) {
+function sizeNameInput(input) {
   const style = getComputedStyle(input);
   const context = document.createElement("canvas").getContext("2d");
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
@@ -695,7 +696,7 @@ document.addEventListener("click", async (event) => {
     const input = editScheduleName.parentElement.querySelector("textarea");
     editScheduleName.hidden = true;
     input.hidden = false;
-    sizeScheduleNameInput(input);
+    sizeNameInput(input);
     input.focus();
     input.select();
     return;
@@ -886,12 +887,13 @@ document.addEventListener("input", (event) => {
   if (event.target.matches('textarea[data-schedule-field="shellCommand"]')) {
     sizeShellCommandInput(event.target);
   }
+  if (event.target.matches(".device-name-input")) sizeNameInput(event.target);
   if (!event.target.hasAttribute("data-schedule-name-input")) return;
   const card = event.target.closest("[data-schedule-index]");
   const schedule = settings.schedules[Number(card.dataset.scheduleIndex)];
   schedule.name = event.target.value;
   card.querySelector("[data-edit-schedule-name]").textContent = schedule.name || "Untitled automation";
-  sizeScheduleNameInput(event.target);
+  sizeNameInput(event.target);
   save();
 });
 
@@ -988,9 +990,14 @@ document.addEventListener("change", async (event) => {
     const device = settings.devices[Number(deviceCard.dataset.deviceIndex)];
     const oldName = device.name;
     const field = event.target.dataset.deviceField;
+    if (field === "name" && !event.target.value.trim()) {
+      event.target.value = device.name;
+      sizeNameInput(event.target);
+      return;
+    }
     device[field] = event.target.type === "checkbox"
       ? event.target.checked
-      : field === "identifier" ? canonicalIdentifier(event.target.value) : event.target.value;
+      : field === "identifier" ? canonicalIdentifier(event.target.value) : field === "name" ? event.target.value.trim() : event.target.value;
     if (field === "name") settings.schedules.forEach((schedule) => { schedule.lights = schedule.lights.map((name) => name === oldName ? device.name : name); });
     await save(); renderAll();
   }
