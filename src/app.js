@@ -1031,9 +1031,23 @@ $("#brightness").addEventListener("input", (event) => {
 });
 $("#brightness").addEventListener("change", save);
 
+// Stopping breathing keeps its last color as the selection (the backend saves it too).
+function keepBreathingSelection() {
+  const frame = latestBreathingFrame;
+  if (!frame || !["breathe", "white-breathe"].includes(activeEffect)) return;
+  if (frame.mode === "white") {
+    const position = whitePlaybackPosition(frame.position);
+    Object.assign(settings, { mode: "white", white: whiteAtPosition(position), whiteKelvin: kelvinAtPosition(position) });
+  } else {
+    Object.assign(settings, { mode: "color", color: colorAtHue(frame.position / 1530 * 360) });
+  }
+  root.dataset.lightMode = settings.mode;
+}
+
 async function toggleEffect(effect) {
   const starting = activeEffect !== effect;
   setStatus(starting ? `Starting ${effect}…` : `Stopping ${effect}…`, "busy");
+  keepBreathingSelection();
   try {
     if (starting && activeEffect) {
       await call("execute_control", { command: { command: "stop_effect" } });

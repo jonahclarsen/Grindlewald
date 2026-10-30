@@ -591,13 +591,17 @@ impl SharedState {
     }
 
     async fn stop_effect(&self) -> Result<String, String> {
-        let effect_mode = self.current_breathing().map(|frame| frame.mode);
+        let breathing = self.current_breathing();
         self.party_active.store(false, Ordering::SeqCst);
         self.breathing_frames.send_replace(None);
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
-        let command = if effect_mode.unwrap_or(settings.mode) == LightMode::White {
+        // Breathing pauses on its last color and keeps it as the selection;
+        // party restores the selection it started from.
+        let command = if let Some(frame) = &breathing {
+            breathing_selection(frame, settings.brightness)
+        } else if settings.mode == LightMode::White {
             ControlCommand::White {
                 value: settings.white.clone(),
                 kelvin: settings.white_kelvin,
@@ -619,6 +623,11 @@ impl SharedState {
             .await;
         if result.as_deref() != Ok(BLUETOOTH_OFF_MESSAGE) {
             self.arm_idle_disconnect(settings.connection_hold_seconds);
+        }
+        if breathing.is_some()
+            && let Err(error) = self.remember_preset(&command)
+        {
+            eprintln!("Grindlewald could not save the breathing color: {error}");
         }
         result.map(|_| "Effect stopped".into())
     }
@@ -952,6 +961,24 @@ fn breathing_command(mode: LightMode, position: u16, device: Option<String>) -> 
         ControlCommand::BreathingFrame {
             value: color_at_position(position),
             device,
+        }
+    }
+}
+
+fn breathing_selection(frame: &BreathingPlayback, brightness: f32) -> ControlCommand {
+    if frame.mode == LightMode::White {
+        let kelvin = white_kelvin_at_phase(frame.position);
+        ControlCommand::White {
+            value: white_at_kelvin(kelvin),
+            kelvin: Some(kelvin),
+            brightness: Some(brightness),
+            device: None,
+        }
+    } else {
+        ControlCommand::Color {
+            value: color_at_position(frame.position),
+            brightness: Some(brightness),
+            device: None,
         }
     }
 }
@@ -1493,6 +1520,51 @@ mod tests {
                 .is_err()
         );
         assert_eq!(*pace.borrow(), Some((7, 45)));
+    }
+
+    #[tokio::test]
+    async fn stopping_breathing_keeps_its_last_color_as_the_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        let settings = Settings {
+            color: "#0000ff".into(),
+            ..Settings::default()
+        };
+        state.save_settings(&settings).unwrap();
+        for (mode, position) in [(LightMode::Color, 255), (LightMode::White, 765)] {
+            state.party_active.store(true, Ordering::SeqCst);
+            let generation = state.party_generation.load(Ordering::SeqCst);
+            state.publish_breathing_mode(position, generation, 0, mode);
+            let mut selections = state.subscribe_light_selection();
+            // No lights are connected, but the color is kept regardless.
+            let _ = state.execute(ControlCommand::StopEffect).await;
+            assert!(state.current_breathing().is_none());
+            let saved = state.load_settings().unwrap();
+            assert_eq!(saved.mode, mode);
+            if mode == LightMode::White {
+                assert_eq!(saved.white_kelvin, Some(9000));
+                assert_eq!(saved.white, "#d9e1ff");
+            } else {
+                assert_eq!(saved.color, "#ffff00");
+            }
+            selections.changed().await.unwrap();
+            assert_eq!(selections.borrow_and_update().as_ref().unwrap().mode, mode);
+        }
+    }
+
+    #[tokio::test]
+    async fn stopping_party_restores_the_saved_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = SharedState::new(directory.path().join("settings.json"));
+        let settings = Settings {
+            color: "#0000ff".into(),
+            ..Settings::default()
+        };
+        state.save_settings(&settings).unwrap();
+        state.party_active.store(true, Ordering::SeqCst);
+        let _ = state.execute(ControlCommand::StopEffect).await;
+        assert_eq!(state.load_settings().unwrap().color, "#0000ff");
+        assert!(state.light_selection.borrow().is_none());
     }
 
     #[tokio::test]

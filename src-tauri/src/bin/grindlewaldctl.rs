@@ -124,7 +124,7 @@ enum CliCommand {
     },
     /// Stop party mode and restore the selected static color.
     StopParty,
-    /// Stop any running party or breathing effect.
+    /// Stop any running party or breathing effect; breathing keeps its current color.
     StopEffect,
     /// Measure one light's minimum step interval and mode-switch spacing (about 20 minutes).
     MeasureStepInterval {
