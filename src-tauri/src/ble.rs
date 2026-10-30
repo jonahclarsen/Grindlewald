@@ -13,9 +13,9 @@ use uuid::Uuid;
 use crate::{
     command::ControlCommand,
     protocol::{
-        CONTROL_CHARACTERISTIC, DeviceProfile, FrameMode, brightness_frame, color_frame,
-        experimental_mode_frame, frame_mode, keep_alive_frame, parse_hex_color, party_frames,
-        power_frame, white_frame,
+        CONTROL_CHARACTERISTIC, DeviceProfile, FrameMode, MULTI_PACKET_SPACING, brightness_frame,
+        color_frame, diy_breathe_frames, experimental_mode_frame, frame_mode, is_multi_packet,
+        keep_alive_frame, parse_hex_color, party_frames, power_frame, scene_frame, white_frame,
     },
     settings::{DeviceConfig, LightMode, Settings},
     spacing::{SEARCH_CEILING_MS, SpacingProbe, TrialKind, find_minimum_spacing},
@@ -157,6 +157,14 @@ impl BleController {
                 None => "No lights connected.".into(),
             });
         }
+        // Scenes and DIY effects skip lights whose model does not offer them.
+        let selected: Vec<DeviceConfig> = selected
+            .into_iter()
+            .filter(|device| supports(command, device.profile))
+            .collect();
+        if selected.is_empty() {
+            return Err("No enabled light offers that mode".into());
+        }
 
         let breathing = matches!(command, ControlCommand::BreathingFrame { .. });
         let connection_started = std::time::Instant::now();
@@ -216,7 +224,11 @@ impl BleController {
                             tokio::time::sleep_until(ready).await;
                         }
                         let started = std::time::Instant::now();
-                        pacing.wrote(profile, mode, tokio::time::Instant::now());
+                        let written = tokio::time::Instant::now();
+                        pacing.wrote(profile, mode, written);
+                        if is_multi_packet(&frame) {
+                            pacing.hold(written + MULTI_PACKET_SPACING);
+                        }
                         let result = peripheral
                             .write(&characteristic, &frame, WriteType::WithoutResponse)
                             .await;
@@ -644,6 +656,10 @@ impl Pacing {
         }
     }
 
+    fn hold(&mut self, until: tokio::time::Instant) {
+        self.next_write = self.next_write.max(Some(until));
+    }
+
     // Keep-alive frames carry no mode, so the strictest spacing is assumed.
     fn keep_alive_written(&mut self, at: tokio::time::Instant) {
         let spacing = crate::protocol::DeviceProfile::slowest_write_spacing();
@@ -840,6 +856,27 @@ fn frames_for(
             Ok(vec![color_frame(profile, parse_hex_color(value)?)])
         }
         ControlCommand::Experiment { payload, .. } => Ok(vec![experimental_mode_frame(payload)?]),
+        ControlCommand::Scene { scene, .. } => {
+            Ok(scene_frame(profile, *scene).into_iter().collect())
+        }
+        ControlCommand::DiyBreathe { colors, speed, .. } => match profile {
+            DeviceProfile::H6005 => diy_breathe_frames(
+                &colors
+                    .iter()
+                    .map(|color| parse_hex_color(color))
+                    .collect::<Result<Vec<_>, _>>()?,
+                *speed,
+            ),
+            DeviceProfile::Classic => Ok(Vec::new()),
+        },
+    }
+}
+
+fn supports(command: &ControlCommand, profile: DeviceProfile) -> bool {
+    match command {
+        ControlCommand::Scene { scene, .. } => scene.code(profile).is_some(),
+        ControlCommand::DiyBreathe { .. } => profile == DeviceProfile::H6005,
+        _ => true,
     }
 }
 

@@ -700,6 +700,14 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 .preset-chip:active { background: var(--tile-press); transform: scale(.98); }
 .preset-chips .empty { grid-column: 1 / -1; }
 
+/* Scenes: chips like presets, ordered after the effect sliders */
+#controller-page > #scenes-heading, #scene-chips, #diy-breathe-pace { order: 7; }
+.scene-chip .swatch { background: var(--current-color); }
+.scene-chip[data-scene="diy"] { grid-column: span 2; }
+.scene-chip[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--tile)); }
+#diy-breathe-pace { height: 44px; padding: 0 14px 0 12px; border-radius: 16px; background: var(--tile); box-shadow: var(--tile-shadow); }
+#diy-breathe-pace[hidden] { display: none; }
+
 /* Experimental modes: an inset group disclosure row */
 .experimental-card { margin: 0; border-radius: 12px; }
 .experimental-card summary { padding: 10px 12px; gap: 10px; border-radius: 12px; cursor: default; }

@@ -3,6 +3,7 @@ import { isMobile, prepareMobile, startMobileUpdates } from "./mobile.js";
 import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
 import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
+import { availableScenes, diyBreatheAvailable, diyBreatheCommand, sceneCommand } from "./scenes.js";
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { makeSortable } from "./sortable.js";
@@ -25,6 +26,7 @@ const demoSettings = {
   breathingIntervalMs: 350,
   breathingColorStep: 1,
   whiteBreathingSweepSeconds: 30,
+  diyBreatheSpeed: 50,
   presets: [
     { name: "daytime", mode: "white", value: "#d6e1ff", brightness: 1 },
     { name: "eveningtime", mode: "white", value: "#ff8912", brightness: 0.35 },
@@ -62,6 +64,8 @@ let breathingSeekRequestId = 0;
 let whitePointerDown = false;
 let huePointerDown = false;
 let activeEffect = null;
+// A built-in scene id, "diy" for the H6005's own breathing, or null.
+let activeScene = null;
 let controlsInFlight = 0;
 let refreshingEffectState = false;
 let demoEffectActive = false;
@@ -330,6 +334,8 @@ function renderLightSelection() {
 
 function queueControl(command) {
   setEffectActive(null);
+  // Brightness changes keep a scene running.
+  if (command.command !== "brightness") setActiveScene(null);
   return controlQueue.enqueue(command);
 }
 
@@ -340,6 +346,7 @@ function setEffectActive(effect) {
     latestBreathingFrame = null;
   }
   activeEffect = effect;
+  if (effect) setActiveScene(null);
   $("#hue-track").setAttribute("aria-label", effect === "breathe" ? "Breathing hue; drag to move within the cycle" : "Color hue");
   $("#color-picker-hint").textContent = effect === "breathe" ? "Breathing · drag to move" : "Drag to choose a hue";
   if (effect !== "breathe" && settings) paintHue(hueFromHex(settings.color));
@@ -358,6 +365,56 @@ function setEffectActive(effect) {
     button.setAttribute("aria-pressed", String(active));
     button.textContent = active ? `Stop ${label.toLowerCase()}` : label;
   });
+}
+
+const modelName = (profile) => profile === "h6005" ? "H6005" : "H6001";
+
+function renderScenes() {
+  const chips = availableScenes(settings.devices).map(({ id, label, models, partial }) =>
+    `<button class="preset-chip scene-chip" data-scene="${id}" aria-pressed="false"${partial ? ` title="${models.map(modelName).join(", ")} only"` : ""}>${label}</button>`);
+  if (diyBreatheAvailable(settings.devices)) {
+    const partial = settings.devices.some((device) => device.enabled && device.profile !== "h6005");
+    chips.push(`<button class="preset-chip scene-chip" data-scene="diy" aria-pressed="false"${partial ? ' title="H6005 only"' : ""}><span class="swatch"></span>Breathe color</button>`);
+  }
+  $("#scene-chips").innerHTML = chips.join("");
+  const hidden = chips.length === 0;
+  $("#scenes-heading").hidden = hidden;
+  $("#scene-chips").hidden = hidden;
+  if (activeScene && !$(`[data-scene="${activeScene}"]`)) activeScene = null;
+  setActiveScene(activeScene);
+}
+
+function setActiveScene(scene) {
+  activeScene = scene;
+  document.querySelectorAll("[data-scene]").forEach((chip) => chip.setAttribute("aria-pressed", String(chip.dataset.scene === scene)));
+  $("#diy-breathe-pace").hidden = scene !== "diy";
+  if (settings) {
+    $("#diy-breathe-speed").value = settings.diyBreatheSpeed;
+    $("#diy-breathe-speed-output").value = String(settings.diyBreatheSpeed);
+    syncRangeFill($("#diy-breathe-speed"));
+  }
+}
+
+const sceneControl = (scene) => scene === "diy" ? diyBreatheCommand(settings.color, settings.diyBreatheSpeed) : sceneCommand(scene);
+
+// Clicking the running scene again restores the saved selection.
+async function toggleScene(scene) {
+  const starting = activeScene !== scene;
+  setStatus(starting ? "Starting scene…" : "Stopping scene…", "busy");
+  keepBreathingSelection();
+  try {
+    // Stopping first saves breathing's last color as the selection.
+    if (activeEffect) {
+      await call("execute_control", { command: { command: "stop_effect" } });
+      setEffectActive(null);
+    }
+    const message = await call("execute_control", { command: starting ? sceneControl(scene) : { command: "stop_effect" } });
+    setActiveScene(starting && !message.includes("Bluetooth is off") ? scene : null);
+    setStatus(message);
+  } catch (error) {
+    setActiveScene(null);
+    setStatus(String(error), "error");
+  }
 }
 
 async function refreshHomeNetwork() {
@@ -657,6 +714,7 @@ function renderAll() {
   if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
   renderBreathingControls();
+  renderScenes();
   renderQuickPresets();
   renderPresets();
   renderSchedules();
@@ -1083,6 +1141,24 @@ async function toggleEffect(effect) {
   }
 }
 
+$("#scene-chips").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-scene]");
+  if (chip) toggleScene(chip.dataset.scene);
+});
+$("#diy-breathe-speed").addEventListener("input", (event) => {
+  settings.diyBreatheSpeed = Number(event.target.value);
+  $("#diy-breathe-speed-output").value = event.target.value;
+  syncRangeFill(event.target);
+});
+$("#diy-breathe-speed").addEventListener("change", async () => {
+  if (!await save()) return;
+  if (activeScene !== "diy") return;
+  try {
+    setStatus(await call("execute_control", { command: sceneControl("diy") }));
+  } catch (error) {
+    setStatus(String(error), "error");
+  }
+});
 $("#party-button").addEventListener("click", () => toggleEffect("party"));
 $("#breathing-button").addEventListener("click", () => toggleEffect("breathe"));
 $("#white-breathing-button").addEventListener("click", () => toggleEffect("white-breathe"));

@@ -152,6 +152,124 @@ pub fn experimental_mode_frame(value: &str) -> Result<[u8; 20], String> {
     Ok(frame(0x05, &payload))
 }
 
+// Built-in light scenes. Each model offers its own set under the shared IDs
+// below, read from the Govee Home 3.6.1 app (H6001: com.govee.h6001.adjust.
+// ScenesFragment; H6005: com.govee.bulblightv2.adjust.ui.ScenesFragment).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Scene {
+    Breathe,
+    Reading,
+    Romantic,
+    Relax,
+    Vivid,
+    Colorful,
+    Morning,
+    Sunset,
+    Candlelight,
+    Fade,
+    Energetic,
+    Heartbeat,
+    Blinking,
+}
+
+impl Scene {
+    pub const ALL: [Self; 13] = [
+        Self::Breathe,
+        Self::Reading,
+        Self::Romantic,
+        Self::Relax,
+        Self::Vivid,
+        Self::Colorful,
+        Self::Morning,
+        Self::Sunset,
+        Self::Candlelight,
+        Self::Fade,
+        Self::Energetic,
+        Self::Heartbeat,
+        Self::Blinking,
+    ];
+
+    // The scene ID, or None if the model's app does not offer the scene.
+    pub const fn code(self, profile: DeviceProfile) -> Option<u8> {
+        match (self, profile) {
+            (Self::Breathe, _) => Some(0x0a),
+            (Self::Reading, _) => Some(0x0d),
+            (Self::Romantic, _) => Some(0x07),
+            (Self::Relax, DeviceProfile::Classic) => Some(0x0e),
+            (Self::Vivid, DeviceProfile::Classic) => Some(0x0c),
+            (Self::Colorful, DeviceProfile::Classic) => Some(0x0b),
+            (Self::Morning, DeviceProfile::Classic) => Some(0x00),
+            (Self::Sunset, DeviceProfile::Classic) => Some(0x01),
+            (Self::Candlelight, DeviceProfile::H6005) => Some(0x09),
+            (Self::Fade, DeviceProfile::H6005) => Some(0x11),
+            (Self::Energetic, DeviceProfile::H6005) => Some(0x10),
+            (Self::Heartbeat, DeviceProfile::H6005) => Some(0x14),
+            (Self::Blinking, DeviceProfile::H6005) => Some(0x19),
+            _ => None,
+        }
+    }
+}
+
+pub fn scene_frame(profile: DeviceProfile, scene: Scene) -> Option<[u8; 20]> {
+    scene.code(profile).map(|code| frame(0x05, &[0x04, code]))
+}
+
+pub const MAX_DIY_COLORS: usize = 8;
+pub const MAX_DIY_SPEED: u8 = 100;
+// The light runs DIY effects by a caller-chosen code; the Govee app uses 0xFE
+// for effects shared between users.
+const DIY_CODE: u8 = 0xfe;
+const DIY_BREATHE_EFFECT: u8 = 0x05;
+// The Govee app waits this long between the packets of a multi-packet upload.
+pub const MULTI_PACKET_SPACING: std::time::Duration = std::time::Duration::from_millis(300);
+
+// H6005 only: uploads a DIY breathing effect through the given colors, then
+// switches to it. Speed runs from 0 (slowest) to 100.
+pub fn diy_breathe_frames(colors: &[[u8; 3]], speed: u8) -> Result<Vec<[u8; 20]>, String> {
+    if colors.is_empty() || colors.len() > MAX_DIY_COLORS {
+        return Err(format!("DIY breathing needs 1 to {MAX_DIY_COLORS} colors"));
+    }
+    if speed > MAX_DIY_SPEED {
+        return Err(format!(
+            "DIY speed must be 0 to {MAX_DIY_SPEED}, got {speed}"
+        ));
+    }
+    // Code, effect, sub-effect, speed, color byte count, colors, then an empty
+    // list of mixed effects.
+    let mut data = vec![
+        DIY_CODE,
+        DIY_BREATHE_EFFECT,
+        0,
+        speed,
+        (colors.len() * 3) as u8,
+    ];
+    data.extend(colors.iter().flatten());
+    data.push(0);
+    let mut frames = multi_packet_frames(0x02, &data);
+    frames.push(frame(0x05, &[0x0a, DIY_CODE]));
+    Ok(frames)
+}
+
+// Splits data into a start packet with the packet count, 16-byte numbered
+// packets, and an end packet, all under the A1 multi-packet write header.
+fn multi_packet_frames(command: u8, data: &[u8]) -> Vec<[u8; 20]> {
+    let chunks = data.chunks(16);
+    let mut frames = vec![packet(0xa1, command, &[0, chunks.len() as u8, 0])];
+    frames.extend(chunks.enumerate().map(|(index, chunk)| {
+        let mut payload = [0_u8; 17];
+        payload[0] = index as u8 + 1;
+        payload[1..=chunk.len()].copy_from_slice(chunk);
+        packet(0xa1, command, &payload)
+    }));
+    frames.push(packet(0xa1, command, &[0xff]));
+    frames
+}
+
+pub fn is_multi_packet(frame: &[u8; 20]) -> bool {
+    frame[0] == 0xa1
+}
+
 pub fn white_frame(profile: DeviceProfile, rgb: [u8; 3], kelvin: Option<u16>) -> [u8; 20] {
     match profile {
         DeviceProfile::Classic => frame(
@@ -237,9 +355,13 @@ pub fn power_frame(on: bool) -> [u8; 20] {
 }
 
 fn frame(command: u8, payload: &[u8]) -> [u8; 20] {
+    packet(0x33, command, payload)
+}
+
+fn packet(header: u8, command: u8, payload: &[u8]) -> [u8; 20] {
     debug_assert!(payload.len() <= 17);
     let mut bytes = [0_u8; 20];
-    bytes[0] = 0x33;
+    bytes[0] = header;
     bytes[1] = command;
     bytes[2..2 + payload.len()].copy_from_slice(payload);
     bytes[19] = bytes[..19]
@@ -298,6 +420,75 @@ mod tests {
         assert_eq!(&packet[..5], &[0x33, 0x05, 0x04, 0x08, 0]);
         assert_eq!(packet[19], 0x3a);
         assert!(experimental_mode_frame("04 definitely-not-hex").is_err());
+    }
+
+    #[test]
+    fn scenes_use_each_models_ids_and_skip_unsupported_ones() {
+        let breathe = scene_frame(DeviceProfile::Classic, Scene::Breathe).unwrap();
+        assert_eq!(&breathe[..5], &[0x33, 0x05, 0x04, 0x0a, 0]);
+        assert_eq!(breathe[19], 0x38);
+        assert_eq!(
+            scene_frame(DeviceProfile::H6005, Scene::Breathe),
+            Some(breathe)
+        );
+        assert_eq!(
+            scene_frame(DeviceProfile::H6005, Scene::Heartbeat).unwrap()[3],
+            0x14
+        );
+        assert_eq!(scene_frame(DeviceProfile::Classic, Scene::Heartbeat), None);
+        assert_eq!(
+            scene_frame(DeviceProfile::Classic, Scene::Vivid).unwrap()[3],
+            0x0c
+        );
+        assert_eq!(scene_frame(DeviceProfile::H6005, Scene::Vivid), None);
+        for scene in Scene::ALL {
+            assert!(
+                [DeviceProfile::Classic, DeviceProfile::H6005]
+                    .iter()
+                    .any(|profile| scene.code(*profile).is_some()),
+                "{scene:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diy_breathing_uploads_in_numbered_packets_then_selects_the_effect() {
+        let frames = diy_breathe_frames(&[[0xff, 0, 0], [0, 0, 0xff]], 50).unwrap();
+        assert_eq!(frames.len(), 4);
+        assert_eq!(&frames[0][..5], &[0xa1, 0x02, 0x00, 0x01, 0x00]);
+        assert_eq!(
+            &frames[1][..16],
+            &[
+                0xa1, 0x02, 0x01, 0xfe, 0x05, 0x00, 0x32, 0x06, 0xff, 0, 0, 0, 0, 0xff, 0, 0
+            ]
+        );
+        assert_eq!(&frames[2][..3], &[0xa1, 0x02, 0xff]);
+        assert_eq!(&frames[3][..4], &[0x33, 0x05, 0x0a, 0xfe]);
+        for frame in &frames {
+            assert_eq!(frame.iter().fold(0_u8, |checksum, byte| checksum ^ byte), 0);
+        }
+        assert!(frames[..3].iter().all(is_multi_packet));
+        assert!(!is_multi_packet(&frames[3]));
+    }
+
+    #[test]
+    fn diy_uploads_split_across_sixteen_byte_packets() {
+        let colors = [[0x11, 0x22, 0x33]; MAX_DIY_COLORS];
+        let frames = diy_breathe_frames(&colors, 100).unwrap();
+        // 5 header bytes, 24 color bytes and the empty mix list make 30 bytes.
+        assert_eq!(frames.len(), 5);
+        assert_eq!(frames[0][3], 2);
+        assert_eq!(frames[2][2], 2);
+        // The first packet ends partway through the fourth color.
+        assert_eq!(&frames[1][3..8], &[0xfe, 0x05, 0x00, 0x64, 0x18]);
+        assert_eq!(&frames[1][8..17], &[0x11, 0x22, 0x33].repeat(3)[..]);
+        assert_eq!(&frames[1][17..19], &[0x11, 0x22]);
+        assert_eq!(frames[2][3], 0x33);
+        assert_eq!(&frames[2][4..16], &[0x11, 0x22, 0x33].repeat(4)[..]);
+        assert_eq!(&frames[2][16..19], &[0, 0, 0]);
+        assert!(diy_breathe_frames(&[], 50).is_err());
+        assert!(diy_breathe_frames(&[[0; 3]; MAX_DIY_COLORS + 1], 50).is_err());
+        assert!(diy_breathe_frames(&colors, 101).is_err());
     }
 
     #[test]

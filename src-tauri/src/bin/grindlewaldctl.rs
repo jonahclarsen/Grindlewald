@@ -6,6 +6,7 @@ use grindlewald_lib::{
     },
     command::{CommandResponse, ControlCommand},
     ipc::socket_path,
+    protocol::{MAX_DIY_COLORS, MAX_DIY_SPEED, Scene},
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -17,6 +18,23 @@ fn parse_interval(value: &str) -> Result<u32, String> {
     let ms = value.parse::<u32>().map_err(|error| error.to_string())?;
     frame_interval(ms)?;
     Ok(ms)
+}
+
+fn scene_name(scene: Scene) -> String {
+    serde_json::to_value(scene)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn parse_scene(value: &str) -> Result<Scene, String> {
+    Scene::ALL
+        .into_iter()
+        .find(|scene| scene_name(*scene).eq_ignore_ascii_case(value))
+        .ok_or_else(|| {
+            let names = Scene::ALL.map(scene_name).join(", ");
+            format!("unknown scene {value:?}; choose one of {names}")
+        })
 }
 
 fn parse_white_sweep(value: &str) -> Result<u32, String> {
@@ -132,6 +150,25 @@ enum CliCommand {
         #[arg(short, long)]
         light: Option<String>,
     },
+    /// Start a built-in scene on every light whose model offers it: breathe, reading,
+    /// romantic, relax, vivid, colorful, morning, sunset (H6001), candlelight, fade,
+    /// energetic, heartbeat, blinking (H6005).
+    Scene {
+        #[arg(value_parser = parse_scene)]
+        scene: Scene,
+        #[arg(short, long)]
+        light: Option<String>,
+    },
+    /// H6005 only: upload a breathing effect through 1-8 colors that the light runs by itself.
+    DiyBreathe {
+        #[arg(required = true, num_args = 1..=MAX_DIY_COLORS)]
+        colors: Vec<String>,
+        /// 0 (slowest) to 100.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(0..=i64::from(MAX_DIY_SPEED)))]
+        speed: u8,
+        #[arg(short, long)]
+        light: Option<String>,
+    },
     /// Try raw hexadecimal bytes after the safe 33 05 color/mode prefix.
     Experiment {
         payload: String,
@@ -218,6 +255,19 @@ async fn main() -> anyhow::Result<()> {
             payload,
             device: Some(light),
         },
+        CliCommand::Scene { scene, light } => ControlCommand::Scene {
+            scene,
+            device: light,
+        },
+        CliCommand::DiyBreathe {
+            colors,
+            speed,
+            light,
+        } => ControlCommand::DiyBreathe {
+            colors,
+            speed,
+            device: light,
+        },
         CliCommand::MeasureStepInterval { light } => {
             ControlCommand::MeasureStepInterval { device: light }
         }
@@ -251,6 +301,28 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use grindlewald_lib::breathing::{MAX_INTERVAL_MS, MIN_INTERVAL_MS};
+
+    #[test]
+    fn scene_and_diy_cli_validate_their_arguments() {
+        let cli = Cli::try_parse_from(["ctl", "scene", "Breathe"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Scene {
+                scene: Scene::Breathe,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["ctl", "scene", "disco"]).is_err());
+        let cli = Cli::try_parse_from(["ctl", "diy-breathe", "#ff4500"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::DiyBreathe { speed: 50, .. }
+        ));
+        assert!(Cli::try_parse_from(["ctl", "diy-breathe"]).is_err());
+        assert!(Cli::try_parse_from(["ctl", "diy-breathe", "#ff4500", "--speed", "101"]).is_err());
+        let nine = vec!["#000000"; MAX_DIY_COLORS + 1];
+        assert!(Cli::try_parse_from([vec!["ctl", "diy-breathe"], nine].concat()).is_err());
+    }
 
     #[test]
     fn white_breathing_cli_accepts_only_supported_sweep_durations() {

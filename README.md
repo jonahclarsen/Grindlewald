@@ -17,6 +17,8 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - A locally streamed rainbow party mode with instant H6005 transitions
 - Breathing mode with 1–100 integer RGB color steps and a fixed 26–1,000 ms interval; defaults to step 1 and 350 ms
 - Frames to each light are spaced by its measured minimums (26 ms, or 47 ms after switching between color and white on the H6005), so quick follow-up changes are not silently dropped
+- Built-in light scenes such as Breathe, Sunset, and Heartbeat, offered per model
+- H6005 DIY breathing of the selected color, run by the light itself at a saved speed
 - A constrained experimental panel for trying scene and music-mode payloads on one light at a time
 - Named color presets shared by the UI, CLI, and automations
 - Compact preset and light rows that expand for editing and collapse when you click elsewhere
@@ -96,6 +98,13 @@ grindlewaldctl breathe-white --sweep-seconds 30
 
 # Measure one light's minimum step interval and mode-switch spacing (about 20 minutes)
 grindlewaldctl measure-step-interval --light Bedroom
+
+# Built-in scenes; lights whose model lacks the scene are left unchanged
+grindlewaldctl scene breathe
+grindlewaldctl scene heartbeat --light Bedroom
+
+# H6005 only: the light breathes through 1-8 colors by itself (speed 0-100)
+grindlewaldctl diy-breathe '#ff4500' '#401000' --speed 50
 
 # Experimental payload bytes after the fixed, safe 33 05 color/mode prefix
 grindlewaldctl experiment '04 08' --light Bedroom
@@ -190,7 +199,21 @@ While the configured connection window is active, Grindlewald sends the captured
 
 Protocol references: [H6005 write-up](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6005.md), [captured H6004/H6005 command set](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6004.md), [H6001/H6127 command set and scenes](https://github.com/egold555/Govee-Reverse-Engineering/blob/master/Products/H6127.md), and [classic H6001 controller](https://github.com/chvolkmann/govee_btled).
 
-H6001 has documented built-in music, scene, and DIY packets. H6005 has confirmed instant music streaming but its scene and DIY payloads remain undocumented. The collapsed **Experimental modes** panel provides known H6001 candidates, some newer-Govee music candidates, and an editable hexadecimal payload. It always fixes the outer command to `33 05`, writes only the normal light-control characteristic, targets one selected light, and cannot access firmware or OTA characteristics. Use **Restore color** if a trial leaves a bulb in an unexpected mode.
+### Scenes and DIY effects
+
+Both models select a built-in scene with `33 05 04 <id>`. The IDs and each model's scene list come from the Govee Home 3.6.1 Android app, the last release before the app was packed with a protector, and were confirmed by reading each light's mode back over the status characteristic (`AA 05` replies `04 <id>`):
+
+| Scene | ID | Model |
+|---|---|---|
+| Breathe, Reading, Romantic | `0A`, `0D`, `07` | both |
+| Relax, Vivid, Colorful, Morning, Sunset | `0E`, `0C`, `0B`, `00`, `01` | H6001 |
+| Candlelight, Fade, Energetic, Heartbeat, Blinking | `09`, `11`, `10`, `14`, `19` | H6005 |
+
+The **Scenes** chips show every scene an enabled light offers; a chip some lights lack names the model that has it, and the other lights stay unchanged. Clicking the running scene again restores the saved selection. Brightness changes keep a scene running; other light controls replace it.
+
+The H6005 (not the H6001) also runs uploaded DIY effects. **Breathe color** uploads a breathing effect through the selected Color and switches to it, so the bulb fades by itself without a Bluetooth stream. The upload is a multi-packet write under the `A1 02` header: a start packet with the packet count, numbered 16-byte data packets (`code, effect 05, sub-effect, speed 0-100, color byte count, RGB…, 0`), and an `FF` end packet, spaced 300 ms apart as the Govee app does, then `33 05 0A <code>` selects it. The light reports `0A FE` afterwards. **Speed** appears while it runs and re-uploads the effect when changed.
+
+The collapsed **Experimental modes** panel provides known H6001 candidates, some newer-Govee music candidates, and an editable hexadecimal payload. It always fixes the outer command to `33 05`, writes only the normal light-control characteristic, targets one selected light, and cannot access firmware or OTA characteristics. Use **Restore color** if a trial leaves a bulb in an unexpected mode.
 
 Helper updates are requested when the privileged helper implementation changes. UI and lighting rebuilds preserve the helper registration and approved administrator commands. The installed helper still has its signed binary digest verified against a root-owned receipt. Installations created before helper-specific fingerprints need one helper update to migrate the receipt. Changing an approved automation's command text still requires reapproval.
 

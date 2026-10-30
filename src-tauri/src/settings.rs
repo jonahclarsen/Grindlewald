@@ -150,6 +150,9 @@ pub struct Settings {
     pub white_breathing_sweep_seconds: u32,
     #[serde(default)]
     pub breathing_defaults_version: u8,
+    // Speed of the H6005's own DIY breathing, 0 (slowest) to 100.
+    #[serde(default = "default_diy_breathe_speed")]
+    pub diy_breathe_speed: u8,
     #[serde(default)]
     pub presets: Vec<Preset>,
     #[serde(default)]
@@ -172,6 +175,10 @@ fn default_mode() -> LightMode {
     LightMode::Color
 }
 
+fn default_diy_breathe_speed() -> u8 {
+    50
+}
+
 fn default_connection_hold_seconds() -> u64 {
     6
 }
@@ -190,6 +197,7 @@ impl Default for Settings {
             breathing_color_step: default_color_step(),
             white_breathing_sweep_seconds: default_white_sweep_seconds(),
             breathing_defaults_version: 3,
+            diy_breathe_speed: default_diy_breathe_speed(),
             presets: vec![
                 Preset {
                     name: "daytime".into(),
@@ -261,6 +269,9 @@ impl Settings {
         frame_interval(self.breathing_interval_ms)?;
         validate_color_step(self.breathing_color_step)?;
         validate_white_sweep_seconds(self.white_breathing_sweep_seconds)?;
+        if self.diy_breathe_speed > crate::protocol::MAX_DIY_SPEED {
+            return Err("DIY breathing speed must be between 0 and 100".into());
+        }
         crate::protocol::parse_hex_color(&self.color)?;
         crate::protocol::parse_hex_color(&self.white)?;
         let mut device_identifiers = HashSet::new();
@@ -423,6 +434,19 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "theme": "aura" })).unwrap();
         let empty: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(settings, empty);
+    }
+
+    #[test]
+    fn diy_breathe_speed_defaults_for_old_settings_and_is_validated() {
+        let old: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(old.diy_breathe_speed, 50);
+        let mut settings = Settings {
+            diy_breathe_speed: 100,
+            ..Settings::default()
+        };
+        assert!(settings.validate().is_ok());
+        settings.diy_breathe_speed = 101;
+        assert!(settings.validate().is_err());
     }
 
     #[test]

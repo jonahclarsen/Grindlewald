@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::Scene;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ControlCommand {
@@ -78,6 +80,17 @@ pub enum ControlCommand {
         payload: String,
         device: Option<String>,
     },
+    // Built-in scenes; lights whose model lacks the scene are left unchanged.
+    Scene {
+        scene: Scene,
+        device: Option<String>,
+    },
+    // H6005 only: the light breathes through these colors by itself.
+    DiyBreathe {
+        colors: Vec<String>,
+        speed: u8,
+        device: Option<String>,
+    },
     // Finds the closest frame spacing one light reliably keeps (src/spacing.rs).
     MeasureStepInterval {
         device: Option<String>,
@@ -98,6 +111,8 @@ impl ControlCommand {
             | Self::PartyFrame { device, .. }
             | Self::BreathingFrame { device, .. }
             | Self::Experiment { device, .. }
+            | Self::Scene { device, .. }
+            | Self::DiyBreathe { device, .. }
             | Self::MeasureStepInterval { device } => device.as_deref(),
             Self::SetWhiteBreathingPace { .. }
             | Self::TraceBreathing { .. }
