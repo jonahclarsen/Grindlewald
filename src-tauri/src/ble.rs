@@ -86,10 +86,7 @@ impl BleController {
             let name = properties
                 .and_then(|properties| properties.local_name)
                 .unwrap_or_else(|| "Bluetooth light".into());
-            if name.to_ascii_lowercase().contains("govee")
-                || name.to_ascii_lowercase().contains("ihoment")
-                || name.to_ascii_lowercase().starts_with('h')
-            {
+            if is_light_name(&name) {
                 discovered.push(DiscoveredDevice {
                     name,
                     identifier: crate::settings::canonical_identifier(&peripheral.id().to_string()),
@@ -724,6 +721,21 @@ impl LightState {
     }
 }
 
+// Govee sells the same lights under several brands (Govee_H6001_1A2B,
+// ihoment_H6005_5E6F, Minger_H6001_3C4D), so the model tag matters, not the brand.
+fn is_light_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["govee", "ihoment", "minger"]
+        .iter()
+        .any(|brand| name.contains(brand))
+        || name.starts_with('h')
+        || name.split('_').any(|part| {
+            part.len() == 5
+                && part.starts_with('h')
+                && part[1..].bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 struct ScanObservation<P> {
     peripheral: P,
     identifier: String,
@@ -879,6 +891,22 @@ mod tests {
                 .unwrap_err()
                 .contains("No lights connected")
         );
+    }
+
+    #[test]
+    fn discovery_accepts_every_govee_brand_and_skips_other_devices() {
+        for name in [
+            "Minger_H6001_3C4D",
+            "ihoment_H6005_5E6F",
+            "Govee_H6001_1A2B",
+            "Other_H6001_7A8B",
+            "H6001",
+        ] {
+            assert!(is_light_name(name), "{name}");
+        }
+        for name in ["LE-Sandos", "bhyve_0F0F0F", "Bluetooth light", "TY"] {
+            assert!(!is_light_name(name), "{name}");
+        }
     }
 
     fn scan_device(name: &str, identifier: &str) -> DeviceConfig {
