@@ -17,4 +17,3 @@ html[data-platform="android"] nav { height: 48px; margin-top: 0; }
 html[data-platform="android"] .controller-status { height: 44px; border-radius: 0; }
 html[data-platform="android"] .page { padding-bottom: 56px; }
 html[data-platform="android"] .error-panel { bottom: 54px; }
-html[data-platform="android"] #device-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
