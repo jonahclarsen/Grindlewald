@@ -213,6 +213,8 @@ The **Scenes** chips show every scene an enabled light offers; a chip some light
 
 The H6005 (not the H6001) also runs uploaded DIY effects. **Breathe color** uploads a breathing effect through the selected Color and switches to it, so the bulb fades by itself without a Bluetooth stream. The upload is a multi-packet write under the `A1 02` header: a start packet with the packet count, numbered 16-byte data packets (`code, effect 05, sub-effect, speed 0-100, color byte count, RGB…, 0`), and an `FF` end packet, spaced 300 ms apart as the Govee app does, then `33 05 0A <code>` selects it. The light reports `0A FE` afterwards. **Speed** appears while it runs and re-uploads the effect when changed.
 
+For the rest of the app's protocol, how to read it again, and ideas not yet built, see [Govee app research](docs/govee-app-research.md).
+
 The collapsed **Experimental modes** panel provides known H6001 candidates, some newer-Govee music candidates, and an editable hexadecimal payload. It always fixes the outer command to `33 05`, writes only the normal light-control characteristic, targets one selected light, and cannot access firmware or OTA characteristics. Use **Restore color** if a trial leaves a bulb in an unexpected mode.
 
 Helper updates are requested when the privileged helper implementation changes. UI and lighting rebuilds preserve the helper registration and approved administrator commands. The installed helper still has its signed binary digest verified against a root-owned receipt. Installations created before helper-specific fingerprints need one helper update to migrate the receipt. Changing an approved automation's command text still requires reapproval.
