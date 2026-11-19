@@ -268,6 +268,8 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 #controller-page .control-card .effect-row { display: contents; }
 
 .service-notice { order: 0; }
+.light-picker { order: 0; }
+.light-picker[hidden] { display: none; }
 .floodlight-card { order: 1; }
 .control-card [data-power], .control-card .effect-button { order: 2; }
 .control-card .control-heading { order: 3; }
@@ -699,6 +701,38 @@ input[type="range"]:focus-visible, input[type="checkbox"]:focus-visible {
 .preset-chip:hover { background: var(--tile-hover); }
 .preset-chip:active { background: var(--tile-press); transform: scale(.98); }
 .preset-chips .empty { grid-column: 1 / -1; }
+
+/* Light picker: which lights the Control page drives; press and drag to paint */
+.light-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 6px;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.light-toggle {
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: var(--fill);
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color .12s, color .12s, box-shadow .12s;
+}
+.light-toggle:hover { background: var(--fill-strong); }
+.light-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--tile));
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1.25px var(--accent), var(--tile-shadow);
+}
+.light-toggle[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--accent) 20%, var(--tile)); }
 
 /* Scenes: chips like presets, ordered after the effect sliders */
 #controller-page > #scenes-heading, #scene-chips, #diy-breathe-pace { order: 7; }

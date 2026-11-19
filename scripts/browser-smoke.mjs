@@ -19,6 +19,27 @@ try {
   const page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator('#quick-presets button').first().waitFor();
+  // Light picker: press one light, drag across the other to match it.
+  const lights=page.locator('#light-picker [data-light]');
+  const pressed=async()=>lights.evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-pressed')));
+  assert.deepEqual(await pressed(),['true','true']);
+  if(mobile) {
+   await lights.nth(0).tap();
+   assert.deepEqual(await pressed(),['false','true']);
+   await lights.nth(0).tap();
+  } else {
+   const centers=await lights.evaluateAll(buttons=>buttons.map(button=>{const box=button.getBoundingClientRect();return [box.x+box.width/2,box.y+box.height/2];}));
+   const drag=async(from,to)=>{await page.mouse.move(...centers[from]);await page.mouse.down();await page.mouse.move(...centers[to],{steps:5});await page.mouse.up();};
+   await drag(0,1);
+   assert.deepEqual(await pressed(),['false','false']);
+   await drag(1,0);
+   assert.deepEqual(await pressed(),['true','true']);
+   await lights.nth(1).click();
+   assert.deepEqual(await pressed(),['true','false']);
+   await lights.nth(1).focus();
+   await page.keyboard.press('Enter');
+  }
+  assert.deepEqual(await pressed(),['true','true']);
   await page.locator('[data-page="settings-page"]').click();
   await page.locator('#add-preset').click();
   await page.locator('#preset-editor [data-expand-editor]').last().click();

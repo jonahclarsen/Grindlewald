@@ -7,6 +7,7 @@ import { availableScenes, diyBreatheAvailable, diyBreatheCommand, sceneCommand }
 import { createAutomationEditorState } from "./automation-editors.js";
 import { homeNetworkMessage } from "./home-network.js";
 import { makeSortable } from "./sortable.js";
+import { bindLightPicker, controlTarget, controlledDevices, lightPickerHtml, loadDeselected, renameDeselected, storeDeselected, withControlTarget } from "./light-picker.js";
 import { createErrorPanel, createStatusReporter, summarizeError } from "./errors.js";
 import { defaultRunOnUseAfter, disableScheduleFor, isScheduleEnabled, runOnUseError, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
@@ -70,6 +71,7 @@ let controlsInFlight = 0;
 let refreshingEffectState = false;
 let demoEffectActive = false;
 let expandedEditorKey = null;
+const deselectedLights = loadDeselected();
 const automationEditors = createAutomationEditorState();
 let windowFocused = document.hasFocus();
 let approvingPrivilegedJob = false;
@@ -271,6 +273,7 @@ async function refreshEffectState() {
 
 async function call(command, args = {}) {
   if (command !== "execute_control") return callBackend(command, args);
+  if (settings) args = { ...args, command: withControlTarget(args.command, controlTarget(settings.devices, deselectedLights)) };
   controlsInFlight += 1;
   try {
     return await callBackend(command, args);
@@ -369,11 +372,20 @@ function setEffectActive(effect) {
 
 const modelName = (profile) => profile === "h6005" ? "H6005" : "H6001";
 
+const controlled = () => controlledDevices(settings.devices, deselectedLights);
+
+function renderLightPicker() {
+  const html = lightPickerHtml(settings.devices, deselectedLights, escapeHtml);
+  $("#light-picker").innerHTML = html;
+  $("#light-picker").hidden = !html;
+}
+
 function renderScenes() {
-  const chips = availableScenes(settings.devices).map(({ id, label, models, partial }) =>
+  const devices = controlled();
+  const chips = availableScenes(devices).map(({ id, label, models, partial }) =>
     `<button class="preset-chip scene-chip" data-scene="${id}" aria-pressed="false"${partial ? ` title="${models.map(modelName).join(", ")} only"` : ""}>${label}</button>`);
-  if (diyBreatheAvailable(settings.devices)) {
-    const partial = settings.devices.some((device) => device.enabled && device.profile !== "h6005");
+  if (diyBreatheAvailable(devices)) {
+    const partial = devices.some((device) => device.enabled && device.profile !== "h6005");
     chips.push(`<button class="preset-chip scene-chip" data-scene="diy" aria-pressed="false"${partial ? ' title="H6005 only"' : ""}><span class="swatch"></span>Breathe color</button>`);
   }
   $("#scene-chips").innerHTML = chips.join("");
@@ -704,12 +716,13 @@ function renderBreathingControls() {
   const sweepLabel = `${settings.whiteBreathingSweepSeconds} s each way`;
   $("#white-breathing-sweep-output").value = sweepLabel;
   $("#white-breathing-sweep").setAttribute("aria-valuetext", sweepLabel);
-  $(".white-breathing-controls").hidden = !whiteBreathingAvailable(settings.devices);
+  $(".white-breathing-controls").hidden = !whiteBreathingAvailable(controlled());
   $("#step-interval-reminder").hidden = lightsToMeasure(settings.devices).length === 0;
   syncRangeFills();
 }
 
 function renderAll() {
+  renderLightPicker();
   renderLightSelection();
   if (latestBreathingFrame) applyBreathingPlayback(latestBreathingFrame);
   $("#connection-hold-seconds").value = settings.connectionHoldSeconds;
@@ -1057,7 +1070,10 @@ document.addEventListener("change", async (event) => {
     device[field] = event.target.type === "checkbox"
       ? event.target.checked
       : field === "identifier" ? canonicalIdentifier(event.target.value) : field === "name" ? event.target.value.trim() : event.target.value;
-    if (field === "name") settings.schedules.forEach((schedule) => { schedule.lights = schedule.lights.map((name) => name === oldName ? device.name : name); });
+    if (field === "name") {
+      settings.schedules.forEach((schedule) => { schedule.lights = schedule.lights.map((name) => name === oldName ? device.name : name); });
+      if (renameDeselected(deselectedLights, oldName, device.name)) storeDeselected(deselectedLights);
+    }
     await save(); renderAll();
   }
 });
@@ -1246,6 +1262,14 @@ $("#add-schedule").addEventListener("click", async () => {
   automationEditors.expandedIds.add(settings.schedules.at(-1).id);
   await save(); renderSchedules();
 });
+bindLightPicker($("#light-picker"), (name, selected) => {
+  if (selected) deselectedLights.delete(name);
+  else deselectedLights.add(name);
+  storeDeselected(deselectedLights);
+  renderScenes();
+  renderBreathingControls();
+});
+
 makeSortable($("#device-editor"), {
   itemSelector: ".light-tile",
   ignoreSelector: "input",
