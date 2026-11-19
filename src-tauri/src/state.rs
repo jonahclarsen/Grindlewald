@@ -19,7 +19,7 @@ use crate::{
         next_frame_deadline, resolve_interval_ms, validate_white_sweep_seconds, white_at_kelvin,
         white_kelvin_at_phase, white_kelvin_from_hex, white_phase,
     },
-    command::ControlCommand,
+    command::{ControlCommand, Lights},
     protocol::DeviceProfile,
     settings::{self, FloodlightAction, LightMode, Schedule, Settings},
 };
@@ -74,6 +74,8 @@ pub struct SharedState {
     breathing_seek: watch::Sender<Option<BreathingSeek>>,
     white_breathing_pace: watch::Sender<Option<(u64, u32)>>,
     light_selection: watch::Sender<Option<LightSelection>>,
+    // The lights the latest effect or scene runs on, restored when it stops.
+    effect_lights: Arc<std::sync::Mutex<Option<Lights>>>,
 }
 
 impl SharedState {
@@ -91,6 +93,7 @@ impl SharedState {
             breathing_seek: watch::channel(None).0,
             white_breathing_pace: watch::channel(None).0,
             light_selection: watch::channel(None).0,
+            effect_lights: Arc::default(),
         }
     }
 
@@ -284,6 +287,14 @@ impl SharedState {
                 .send_replace(Some((playback.generation, *sweep_seconds)));
             return Ok("White breathing pace updated".into());
         }
+        if let ControlCommand::Party { device }
+        | ControlCommand::Breathe { device, .. }
+        | ControlCommand::BreatheWhite { device, .. }
+        | ControlCommand::Scene { device, .. }
+        | ControlCommand::DiyBreathe { device, .. } = &command
+        {
+            *self.effect_lights.lock().unwrap() = device.clone();
+        }
         if let ControlCommand::Party { device } = &command {
             return self.start_party(device.clone()).await;
         }
@@ -309,7 +320,7 @@ impl SharedState {
         } = &command
         {
             validate_white_sweep_seconds(*sweep_seconds)?;
-            reject_white_breathing_on_h6005(&self.load_settings()?, device.as_deref())?;
+            reject_white_breathing_on_h6005(&self.load_settings()?, device.as_ref())?;
             return self
                 .start_breathing_mode(350, 1, device.clone(), LightMode::White, *sweep_seconds)
                 .await;
@@ -330,7 +341,7 @@ impl SharedState {
                 .controller
                 .lock()
                 .await
-                .measure_write_spacing(&settings, device.as_deref())
+                .measure_write_spacing(&settings, device.as_ref())
                 .await;
             if result.as_deref() != Ok(BLUETOOTH_OFF_MESSAGE) {
                 self.arm_idle_disconnect(settings.connection_hold_seconds);
@@ -358,7 +369,7 @@ impl SharedState {
         result
     }
 
-    async fn start_party(&self, device: Option<String>) -> Result<String, String> {
+    async fn start_party(&self, device: Option<Lights>) -> Result<String, String> {
         if self.party_active.swap(true, Ordering::SeqCst) {
             return Ok("Party mode is already running".into());
         }
@@ -422,7 +433,7 @@ impl SharedState {
                 let result = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
-                    result = controller.apply(&settings, &command) => result,
+                    result = controller.apply_frame(&settings, &command) => result,
                 };
                 if result.is_err() || result.as_deref() == Ok(BLUETOOTH_OFF_MESSAGE) {
                     state.party_generation.fetch_add(1, Ordering::SeqCst);
@@ -443,7 +454,7 @@ impl SharedState {
         &self,
         interval_ms: u32,
         color_step: u16,
-        device: Option<String>,
+        device: Option<Lights>,
     ) -> Result<String, String> {
         self.start_breathing_mode(interval_ms, color_step, device, LightMode::Color, 30)
             .await
@@ -453,7 +464,7 @@ impl SharedState {
         &self,
         interval_ms: u32,
         color_step: u16,
-        device: Option<String>,
+        device: Option<Lights>,
         mode: LightMode,
         sweep_seconds: u32,
     ) -> Result<String, String> {
@@ -563,7 +574,7 @@ impl SharedState {
                 let result = tokio::select! {
                     biased;
                     _ = cancelled.changed() => break,
-                    result = controller.apply(&settings, &command) => result,
+                    result = controller.apply_frame(&settings, &command) => result,
                 };
                 crate::timing::record("apply", started.into_std(), None, result.is_ok());
                 deadline = next_frame_deadline(started, tokio::time::Instant::now(), interval);
@@ -597,22 +608,23 @@ impl SharedState {
         self.party_generation.fetch_add(1, Ordering::SeqCst);
         self.activity_generation.fetch_add(1, Ordering::SeqCst);
         let settings = self.load_settings()?;
+        let device = self.effect_lights.lock().unwrap().take();
         // Breathing pauses on its last color and keeps it as the selection;
         // party restores the selection it started from.
         let command = if let Some(frame) = &breathing {
-            breathing_selection(frame, settings.brightness)
+            breathing_selection(frame, settings.brightness, device)
         } else if settings.mode == LightMode::White {
             ControlCommand::White {
                 value: settings.white.clone(),
                 kelvin: settings.white_kelvin,
                 brightness: Some(settings.brightness),
-                device: None,
+                device,
             }
         } else {
             ControlCommand::Color {
                 value: settings.color.clone(),
                 brightness: Some(settings.brightness),
-                device: None,
+                device,
             }
         };
         let result = self
@@ -838,7 +850,7 @@ impl SharedState {
             match self
                 .execute_automatic(ControlCommand::Preset {
                     name: schedule.preset.clone(),
-                    device: target,
+                    device: target.map(Into::into),
                 })
                 .await
             {
@@ -932,12 +944,12 @@ impl SharedState {
 // that profile. It stays on for Classic (H6001) lights until they are tried too.
 fn reject_white_breathing_on_h6005(
     settings: &Settings,
-    device: Option<&str>,
+    device: Option<&Lights>,
 ) -> Result<(), String> {
     let h6005 = settings.devices.iter().find(|light| {
         light.enabled
             && light.profile == DeviceProfile::H6005
-            && device.is_none_or(|wanted| light.name.eq_ignore_ascii_case(wanted))
+            && device.is_none_or(|wanted| wanted.includes(&light.name))
     });
     match h6005 {
         Some(light) => Err(format!(
@@ -948,7 +960,7 @@ fn reject_white_breathing_on_h6005(
     }
 }
 
-fn breathing_command(mode: LightMode, position: u16, device: Option<String>) -> ControlCommand {
+fn breathing_command(mode: LightMode, position: u16, device: Option<Lights>) -> ControlCommand {
     if mode == LightMode::White {
         let kelvin = white_kelvin_at_phase(position);
         ControlCommand::White {
@@ -965,20 +977,24 @@ fn breathing_command(mode: LightMode, position: u16, device: Option<String>) -> 
     }
 }
 
-fn breathing_selection(frame: &BreathingPlayback, brightness: f32) -> ControlCommand {
+fn breathing_selection(
+    frame: &BreathingPlayback,
+    brightness: f32,
+    device: Option<Lights>,
+) -> ControlCommand {
     if frame.mode == LightMode::White {
         let kelvin = white_kelvin_at_phase(frame.position);
         ControlCommand::White {
             value: white_at_kelvin(kelvin),
             kelvin: Some(kelvin),
             brightness: Some(brightness),
-            device: None,
+            device,
         }
     } else {
         ControlCommand::Color {
             value: color_at_position(frame.position),
             brightness: Some(brightness),
-            device: None,
+            device,
         }
     }
 }
@@ -1473,7 +1489,7 @@ mod tests {
             });
         }
         state.save_settings(&settings).unwrap();
-        for device in [None, Some("lamp".to_string())] {
+        for device in [None, Some("lamp".to_string().into())] {
             let error = state
                 .execute(ControlCommand::BreatheWhite {
                     sweep_seconds: 30,
@@ -1486,7 +1502,10 @@ mod tests {
         assert!(!state.party_active.load(Ordering::SeqCst));
         assert!(state.current_breathing().is_none());
 
-        assert!(super::reject_white_breathing_on_h6005(&settings, Some("Strip")).is_ok());
+        assert!(
+            super::reject_white_breathing_on_h6005(&settings, Some(&"Strip".to_string().into()))
+                .is_ok()
+        );
         settings.devices[0].enabled = false;
         assert!(super::reject_white_breathing_on_h6005(&settings, None).is_ok());
     }

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
 
 use btleplug::{
     api::{
@@ -11,7 +14,7 @@ use futures::{Stream, StreamExt, future::join_all};
 use uuid::Uuid;
 
 use crate::{
-    command::ControlCommand,
+    command::{ControlCommand, Lights},
     protocol::{
         CONTROL_CHARACTERISTIC, DeviceProfile, FrameMode, MULTI_PACKET_SPACING, brightness_frame,
         color_frame, diy_breathe_frames, experimental_mode_frame, frame_mode, is_multi_packet,
@@ -30,6 +33,37 @@ pub struct DiscoveredDevice {
 
 pub const BLUETOOTH_OFF_MESSAGE: &str = "Bluetooth is off; lights unchanged";
 const MEASUREMENT_CONNECTIONS: usize = 3;
+// A light that was not found is skipped, without another scan, for this long
+// while other targeted lights are reachable. Every scan for it costs the full
+// scan window, which would otherwise slow every change to the lights that are.
+const UNAVAILABLE_RETRY: Duration = Duration::from_secs(10);
+
+// Targeted lights that could not be reached by one command.
+#[derive(Debug, Default)]
+struct Unreachable {
+    // Normalized identifiers, so callers can leave these lights out.
+    lights: HashSet<String>,
+    not_found: Vec<String>,
+    errors: Vec<String>,
+}
+
+impl Unreachable {
+    fn is_empty(&self) -> bool {
+        self.not_found.is_empty() && self.errors.is_empty()
+    }
+
+    fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.not_found.is_empty() {
+            parts.push(format!(
+                "could not find {} over Bluetooth",
+                self.not_found.join(", ")
+            ));
+        }
+        parts.extend(self.errors.iter().cloned());
+        parts.join("; ")
+    }
+}
 
 pub struct BleController {
     #[cfg(test)]
@@ -40,6 +74,8 @@ pub struct BleController {
     light_states: HashMap<String, LightState>,
     control_characteristics: HashMap<String, Characteristic>,
     pacing: HashMap<String, Pacing>,
+    // When each light last failed to turn up in a scan or to connect.
+    unavailable: HashMap<String, Instant>,
 }
 
 impl Default for BleController {
@@ -59,6 +95,7 @@ impl BleController {
             light_states: HashMap::new(),
             control_characteristics: HashMap::new(),
             pacing: HashMap::new(),
+            unavailable: HashMap::new(),
         }
     }
 
@@ -136,6 +173,28 @@ impl BleController {
         settings: &Settings,
         command: &ControlCommand,
     ) -> Result<String, String> {
+        self.apply_with_retry(settings, command, Some(UNAVAILABLE_RETRY))
+            .await
+    }
+
+    // Effect frames: lights that were missing are left out until the effect
+    // ends, so a frame never waits out a scan for them.
+    pub async fn apply_frame(
+        &mut self,
+        settings: &Settings,
+        command: &ControlCommand,
+    ) -> Result<String, String> {
+        self.apply_with_retry(settings, command, None).await
+    }
+
+    // Lights that cannot be reached are skipped; the command fails only when
+    // no targeted light was updated.
+    async fn apply_with_retry(
+        &mut self,
+        settings: &Settings,
+        command: &ControlCommand,
+        retry_unavailable_after: Option<Duration>,
+    ) -> Result<String, String> {
         if self.bluetooth_powered_off().await? {
             return Ok(BLUETOOTH_OFF_MESSAGE.into());
         }
@@ -146,19 +205,20 @@ impl BleController {
             .filter(|device| {
                 command
                     .device()
-                    .is_none_or(|wanted| device.name.eq_ignore_ascii_case(wanted))
+                    .is_none_or(|wanted| wanted.includes(&device.name))
             })
             .cloned()
             .collect();
 
         if selected.is_empty() {
             return Err(match command.device() {
-                Some(name) => format!("no enabled device named {name:?}"),
+                Some(lights) if lights.is_empty() => "No lights selected".into(),
+                Some(lights) => format!("No enabled light named {lights}"),
                 None => "No lights connected.".into(),
             });
         }
         // Scenes and DIY effects skip lights whose model does not offer them.
-        let selected: Vec<DeviceConfig> = selected
+        let mut selected: Vec<DeviceConfig> = selected
             .into_iter()
             .filter(|device| supports(command, device.profile))
             .collect();
@@ -166,9 +226,30 @@ impl BleController {
             return Err("No enabled light offers that mode".into());
         }
 
+        let mut unreachable = Unreachable::default();
+        let recently_missing = |device: &DeviceConfig| {
+            self.unavailable
+                .get(&normalize(&device.identifier))
+                .is_some_and(|since| {
+                    retry_unavailable_after.is_none_or(|retry| since.elapsed() < retry)
+                })
+        };
+        // Still look for them when nothing else would be updated.
+        if !selected.iter().all(recently_missing) {
+            let (skipped, kept) = selected.into_iter().partition(recently_missing);
+            selected = kept;
+            unreachable.not_found = skipped.into_iter().map(|device| device.name).collect();
+        }
+
         let breathing = matches!(command, ControlCommand::BreathingFrame { .. });
         let connection_started = std::time::Instant::now();
-        self.ensure_connected(&selected).await?;
+        let missed = self.ensure_connected(&selected).await?;
+        selected.retain(|device| !missed.lights.contains(&normalize(&device.identifier)));
+        unreachable.not_found.extend(missed.not_found);
+        unreachable.errors.extend(missed.errors);
+        if selected.is_empty() {
+            return Err(unreachable.describe());
+        }
         if breathing {
             crate::timing::record("connection_check", connection_started, None, true);
         }
@@ -251,7 +332,6 @@ impl BleController {
 
         let results = join_all(writes).await;
         let mut changed = Vec::new();
-        let mut errors = Vec::new();
         for (key, pacing, result) in results {
             self.pacing.insert(key.clone(), pacing);
             match result {
@@ -259,13 +339,19 @@ impl BleController {
                     self.light_states.insert(key, state);
                     changed.push(name);
                 }
-                Err(error) => errors.push(error),
+                Err(error) => unreachable.errors.push(error),
             }
         }
-        if errors.is_empty() {
+        if changed.is_empty() {
+            Err(unreachable.describe())
+        } else if unreachable.is_empty() {
             Ok(format!("Updated {} light(s)", changed.len()))
         } else {
-            Err(errors.join("; "))
+            Ok(format!(
+                "Updated {} light(s); {}",
+                changed.len(),
+                unreachable.describe()
+            ))
         }
     }
 
@@ -273,7 +359,7 @@ impl BleController {
     pub async fn measure_write_spacing(
         &mut self,
         settings: &Settings,
-        device: Option<&str>,
+        device: Option<&Lights>,
     ) -> Result<String, String> {
         if self.bluetooth_powered_off().await? {
             return Ok(BLUETOOTH_OFF_MESSAGE.into());
@@ -282,15 +368,13 @@ impl BleController {
             .devices
             .iter()
             .filter(|candidate| candidate.enabled)
-            .filter(|candidate| {
-                device.is_none_or(|wanted| candidate.name.eq_ignore_ascii_case(wanted))
-            })
+            .filter(|candidate| device.is_none_or(|wanted| wanted.includes(&candidate.name)))
             .cloned()
             .collect();
         let [device] = selected.as_slice() else {
             return Err(match device {
-                Some(name) => format!("no enabled device named {name:?}"),
-                None => "Choose one light to measure".into(),
+                Some(lights) if selected.is_empty() => format!("No enabled light named {lights}"),
+                _ => "Choose one light to measure".into(),
             });
         };
         // The limits change from one Bluetooth connection to the next, so measure
@@ -329,7 +413,7 @@ impl BleController {
                 settings,
                 &ControlCommand::Brightness {
                     value: settings.brightness,
-                    device: Some(device.name.clone()),
+                    device: Some(device.name.clone().into()),
                 },
             )
             .await;
@@ -362,7 +446,10 @@ impl BleController {
         &mut self,
         device: &DeviceConfig,
     ) -> Result<(u64, u64), String> {
-        self.ensure_connected(std::slice::from_ref(device)).await?;
+        let missed = self.ensure_connected(std::slice::from_ref(device)).await?;
+        if !missed.is_empty() {
+            return Err(missed.describe());
+        }
         let key = normalize(&device.identifier);
         let peripheral = self.connections[&key].clone();
         let characteristic_uuid = Uuid::parse_str(CONTROL_CHARACTERISTIC)
@@ -395,7 +482,8 @@ impl BleController {
         Ok((same_mode?, mode_switch?))
     }
 
-    async fn ensure_connected(&mut self, devices: &[DeviceConfig]) -> Result<(), String> {
+    // Connects what it can; Err only when Bluetooth itself fails.
+    async fn ensure_connected(&mut self, devices: &[DeviceConfig]) -> Result<Unreachable, String> {
         let mut missing = Vec::new();
         for device in devices {
             let connection_key = normalize(&device.identifier);
@@ -410,7 +498,7 @@ impl BleController {
             }
         }
         if missing.is_empty() {
-            return Ok(());
+            return Ok(Unreachable::default());
         }
 
         let adapter = self.adapter().await?;
@@ -449,41 +537,46 @@ impl BleController {
         // through disconnect_all, including while scan_targets is awaiting an event.
         let stop_result = adapter.stop_scan().await.map_err(|error| error.to_string());
         self.scan_active = false;
-        let targets = targets?;
+        let (targets, not_found) = targets?;
         stop_result?;
+        let mut unreachable = Unreachable::default();
+        for device in not_found {
+            let key = normalize(&device.identifier);
+            self.unavailable.insert(key.clone(), Instant::now());
+            unreachable.lights.insert(key);
+            unreachable.not_found.push(device.name);
+        }
         // Track attempts before awaiting connect so cancellation can release every link.
         for (device, peripheral) in &targets {
             self.connections
                 .insert(normalize(&device.identifier), peripheral.clone());
         }
         let jobs = targets.into_iter().map(|(device, peripheral)| async move {
-            if !peripheral
-                .is_connected()
-                .await
-                .map_err(|error| error.to_string())?
-            {
-                peripheral
-                    .connect()
-                    .await
-                    .map_err(|error| format!("{}: {error}", device.name))?;
+            let result = async {
+                if !peripheral.is_connected().await? {
+                    peripheral.connect().await?;
+                }
+                peripheral.discover_services().await
             }
-            peripheral
-                .discover_services()
-                .await
-                .map_err(|error| format!("{}: {error}", device.name))?;
-            Ok::<_, String>(())
+            .await
+            .map_err(|error| format!("{}: {error}", device.name));
+            (device, result)
         });
 
-        let errors: Vec<_> = join_all(jobs)
-            .await
-            .into_iter()
-            .filter_map(Result::err)
-            .collect();
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("; "))
+        for (device, result) in join_all(jobs).await {
+            let key = normalize(&device.identifier);
+            match result {
+                Ok(()) => {
+                    self.unavailable.remove(&key);
+                }
+                Err(error) => {
+                    self.unavailable.insert(key.clone(), Instant::now());
+                    unreachable.lights.insert(key);
+                    unreachable.errors.push(error);
+                }
+            }
         }
+        Ok(unreachable)
     }
 
     // A dropped automation future may have been scanning. Release that scan
@@ -527,6 +620,7 @@ impl BleController {
     }
 
     pub async fn disconnect_all(&mut self) -> Result<(), String> {
+        self.unavailable.clear();
         if self.adapter.is_some() && self.bluetooth_powered_off().await? {
             self.scan_active = false;
             let identifiers: Vec<_> = self.connections.keys().cloned().collect();
@@ -759,11 +853,12 @@ struct ScanObservation<P> {
 }
 
 // Only fresh scan events feed this collector, never stale cached peripherals.
+// Returns the lights found and those still missing when the window closed.
 async fn scan_targets<P: Clone>(
     devices: &[DeviceConfig],
     observations: impl Stream<Item = Result<ScanObservation<P>, String>>,
     scan_window: Duration,
-) -> Result<Vec<(DeviceConfig, P)>, String> {
+) -> Result<ScanResult<P>, String> {
     futures::pin_mut!(observations);
     let deadline = tokio::time::Instant::now() + scan_window;
     let mut targets = Vec::new();
@@ -785,19 +880,10 @@ async fn scan_targets<P: Clone>(
             !matches
         });
     }
-    if missing.is_empty() {
-        Ok(targets)
-    } else {
-        Err(format!(
-            "could not find {} over Bluetooth",
-            missing
-                .iter()
-                .map(|device| device.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-    }
+    Ok((targets, missing))
 }
+
+type ScanResult<P> = (Vec<(DeviceConfig, P)>, Vec<DeviceConfig>);
 
 fn normalize(value: &str) -> String {
     value
@@ -976,7 +1062,8 @@ mod tests {
         )
         .await
         .expect("discovery must not wait out the 1.4-second window")
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0, devices[0]);
     }
@@ -1000,7 +1087,8 @@ mod tests {
         )
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(targets.len(), 2);
         assert_eq!(targets[0].0, devices[0]);
         assert_eq!(targets[1].0, devices[1]);
@@ -1010,7 +1098,7 @@ mod tests {
     async fn reconnect_discovery_times_out_and_reports_only_missing_lights() {
         let observations =
             futures::stream::iter([observation("aa11", None)]).chain(futures::stream::pending());
-        let error = tokio::time::timeout(
+        let (found, missing) = tokio::time::timeout(
             Duration::from_millis(200),
             scan_targets(
                 &[scan_device("Desk", "AA11"), scan_device("Shelf", "BB22")],
@@ -1020,8 +1108,10 @@ mod tests {
         )
         .await
         .expect("missing lights must not leave discovery running indefinitely")
-        .unwrap_err();
-        assert_eq!(error, "could not find Shelf over Bluetooth");
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0.name, "Desk");
+        assert_eq!(missing, [scan_device("Shelf", "BB22")]);
     }
 
     #[tokio::test]
@@ -1036,16 +1126,15 @@ mod tests {
                 .unwrap_err(),
             "Bluetooth unavailable"
         );
-        assert_eq!(
-            scan_targets::<usize>(
-                &devices,
-                futures::stream::empty(),
-                Duration::from_millis(1400)
-            )
-            .await
-            .unwrap_err(),
-            "could not find Desk over Bluetooth"
-        );
+        let (found, missing) = scan_targets::<usize>(
+            &devices,
+            futures::stream::empty(),
+            Duration::from_millis(1400),
+        )
+        .await
+        .unwrap();
+        assert!(found.is_empty());
+        assert_eq!(missing, devices);
     }
 
     #[test]

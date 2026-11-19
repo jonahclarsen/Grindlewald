@@ -188,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
         } => ControlCommand::Color {
             value,
             brightness,
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::White {
             value,
@@ -199,21 +199,23 @@ async fn main() -> anyhow::Result<()> {
             value,
             kelvin,
             brightness,
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::Brightness { value, light } => ControlCommand::Brightness {
             value,
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::Power { state, light } => ControlCommand::Power {
             on: matches!(state, PowerState::On),
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::Preset { name, light } => ControlCommand::Preset {
             name,
-            device: light,
+            device: light.map(Into::into),
         },
-        CliCommand::Party { light } => ControlCommand::Party { device: light },
+        CliCommand::Party { light } => ControlCommand::Party {
+            device: light.map(Into::into),
+        },
         CliCommand::Breathe {
             interval_ms,
             cycle_seconds,
@@ -232,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
                 pace_seconds: None,
                 color_step,
                 hue_step_degrees: None,
-                device: light,
+                device: light.map(Into::into),
             }
         }
         CliCommand::BreatheWhite {
@@ -240,7 +242,7 @@ async fn main() -> anyhow::Result<()> {
             light,
         } => ControlCommand::BreatheWhite {
             sweep_seconds,
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::TraceBreathing {
             seconds,
@@ -253,11 +255,11 @@ async fn main() -> anyhow::Result<()> {
         CliCommand::StopEffect => ControlCommand::StopEffect,
         CliCommand::Experiment { payload, light } => ControlCommand::Experiment {
             payload,
-            device: Some(light),
+            device: Some(light.into()),
         },
         CliCommand::Scene { scene, light } => ControlCommand::Scene {
             scene,
-            device: light,
+            device: light.map(Into::into),
         },
         CliCommand::DiyBreathe {
             colors,
@@ -266,11 +268,11 @@ async fn main() -> anyhow::Result<()> {
         } => ControlCommand::DiyBreathe {
             colors,
             speed,
-            device: light,
+            device: light.map(Into::into),
         },
-        CliCommand::MeasureStepInterval { light } => {
-            ControlCommand::MeasureStepInterval { device: light }
-        }
+        CliCommand::MeasureStepInterval { light } => ControlCommand::MeasureStepInterval {
+            device: light.map(Into::into),
+        },
     };
 
     let path = socket_path();
