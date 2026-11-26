@@ -705,7 +705,82 @@ impl SharedState {
             schedule.privileged_approved_command.clear();
             schedule.privileged_approved_at.clear();
         }
+        for shortcut in &mut settings.shortcuts {
+            shortcut.privileged_approved_command.clear();
+        }
         self.save_settings(&settings)
+    }
+
+    /// Approves every root shortcut whose command changed, with one macOS prompt.
+#[cfg(not(target_os = "android"))]
+    pub fn approve_shortcuts(&self) -> Result<String, String> {
+        let jobs: Vec<(String, String)> = self
+            .load_settings()?
+            .shortcuts
+            .iter()
+            .filter(|shortcut| shortcut.needs_approval())
+            .map(|shortcut| (shortcut.id.clone(), shortcut.command.trim().to_owned()))
+            .collect();
+        if jobs.is_empty() {
+            return Ok("Nothing to approve".into());
+        }
+        let config_directory = self
+            .settings_path
+            .parent()
+            .ok_or("settings path has no parent")?;
+        crate::approvals::approve_jobs(config_directory, &jobs)?;
+        // Reload so edits made while the prompt was open are not lost.
+        let mut latest = self.load_settings()?;
+        for shortcut in &mut latest.shortcuts {
+            if let Some((_, command)) = jobs.iter().find(|(id, _)| *id == shortcut.id) {
+                shortcut.privileged_approved_command = command.clone();
+            }
+        }
+        self.save_settings(&latest)?;
+        Ok(format!("Approved {}", jobs.len()))
+    }
+
+#[cfg(not(target_os = "android"))]
+    pub fn revoke_shortcut(&self, id: &str) -> Result<String, String> {
+        let message = privileged::revoke_job(id)?;
+        let mut settings = self.load_settings()?;
+        if let Some(shortcut) = settings.shortcuts.iter_mut().find(|shortcut| shortcut.id == id) {
+            shortcut.privileged_approved_command.clear();
+            self.save_settings(&settings)?;
+        }
+        Ok(message)
+    }
+
+#[cfg(not(target_os = "android"))]
+    pub async fn run_shortcut(&self, id: &str) -> Result<String, String> {
+        let settings = self.load_settings()?;
+        let shortcut = settings
+            .shortcuts
+            .iter()
+            .find(|shortcut| shortcut.id == id)
+            .ok_or_else(|| format!("shortcut {id:?} was not found"))?;
+        let command = shortcut.command.trim();
+        if command.is_empty() {
+            return Err(format!("{} has no command", shortcut.name));
+        }
+        if shortcut.run_as_administrator {
+            if shortcut.needs_approval() {
+                return Err(format!("{} needs approval", shortcut.name));
+            }
+            privileged::run_job(id).await?;
+            return Ok(format!("{} done", shortcut.name));
+        }
+        let output = tokio::process::Command::new("/bin/zsh")
+            .args(["-lc", command])
+            .output()
+            .await
+            .map_err(|error| format!("could not start {}: {error}", shortcut.name))?;
+        if output.status.success() {
+            Ok(format!("{} done", shortcut.name))
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            Err(format!("{} failed ({}): {stderr}", shortcut.name, output.status))
+        }
     }
 
 #[cfg(not(target_os = "android"))]

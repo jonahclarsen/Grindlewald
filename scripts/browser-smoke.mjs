@@ -53,11 +53,19 @@ try {
   if(mobile) {
    assert.equal(await page.locator('[data-page="automations-page"]').count(),0);
    assert.equal(await page.locator('#automations-page').count(),0);
+   assert.equal(await page.locator('#shortcuts-page').count(),0);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    assert.equal(await page.evaluate(()=>{const nav=document.querySelector('nav').getBoundingClientRect();return [...document.querySelectorAll('nav button')].every(button=>button.getBoundingClientRect().bottom<=nav.bottom);}),true);
   } else {
    await page.locator('[data-page="automations-page"]').click();
    await page.locator('#add-schedule').click();
+   await page.keyboard.press('Meta+2');
+   await page.locator('[data-run-shortcut="demo-lid"]').click();
+   await page.locator('#status').filter({hasText:'Lid closed: stay awake done'}).waitFor();
+   assert.equal(await page.locator('#shortcut-approval').isHidden(),true);
+   await page.locator('#edit-shortcuts').click();
+   await page.locator('#add-shortcut').click();
+   assert.equal(await page.locator('.shortcut-editor').count(),4);
   }
   assert.deepEqual(errors,[]);
   await context.close();

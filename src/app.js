@@ -9,6 +9,7 @@ import { homeNetworkMessage } from "./home-network.js";
 import { makeSortable } from "./sortable.js";
 import { bindLightPicker, controlTarget, controlledDevices, lightPickerHtml, loadDeselected, renameDeselected, storeDeselected, withControlTarget } from "./light-picker.js";
 import { createErrorPanel, createStatusReporter, summarizeError } from "./errors.js";
+import { needsApproval, newShortcut, pendingApprovals } from "./shortcuts.js";
 import { defaultRunOnUseAfter, disableScheduleFor, isScheduleEnabled, runOnUseError, schedulePauseLabel, sortedScheduleEntries, usesAllLights } from "./schedules.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
@@ -34,6 +35,11 @@ const demoSettings = {
     { name: "nighttime", mode: "color", value: "#ff4500", brightness: 0.35 },
     { name: "nighttimedark", mode: "color", value: "#ff4500", brightness: 0.03 },
     { name: "crashtime", mode: "color", value: "#ff4500", brightness: 0 },
+  ],
+  shortcuts: [
+    { id: "demo-low-power", name: "Low Power Mode on", command: "pmset -a lowpowermode 1", runAsAdministrator: true, privilegedApprovedCommand: "pmset -a lowpowermode 1" },
+    { id: "demo-lid", name: "Lid closed: stay awake", command: "pmset -a disablesleep 1", runAsAdministrator: true, privilegedApprovedCommand: "" },
+    { id: "demo-vlc", name: "Close VLC in 5m", command: "sleep 2; osascript -e 'quit app \"VLC\"'", runAsAdministrator: false, privilegedApprovedCommand: "" },
   ],
   schedules: [
     { id: "demo-evening", name: "Evening wind-down", time: "21:30", enabled: true, lights: ["Studio lamp", "Bedroom"], preset: "eveningtime", floodlights: "off", shellCommand: "shortcuts run 'Wind Down'", runAsAdministrator: true, privilegedApprovedCommand: "shortcuts run 'Wind Down'", privilegedApprovedAt: "2026-09-04T08:00:00-07:00" },
@@ -75,6 +81,9 @@ const deselectedLights = loadDeselected();
 const automationEditors = createAutomationEditorState();
 let windowFocused = document.hasFocus();
 let approvingPrivilegedJob = false;
+let editingShortcuts = false;
+let approvingShortcuts = null;
+const runningShortcuts = new Set();
 let privilegedService = demoMode
   ? { installed: true, healthy: true, current: true, message: "Ready for unattended administrator jobs" }
   : { installed: false, healthy: false, current: false, message: "Not installed" };
@@ -307,7 +316,17 @@ async function callBackend(command, args = {}) {
       return "Privileged automation service removed";
     }
     if (command === "approve_privileged_job") return "Administrator command approved for unattended use";
-    if (command === "revoke_privileged_job") return "Administrator job approval revoked";
+    if (command === "revoke_privileged_job" || command === "revoke_shortcut") return "Administrator job approval revoked";
+    if (command === "run_shortcut") {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return `${settings.shortcuts.find((shortcut) => shortcut.id === args.id)?.name} done`;
+    }
+    if (command === "approve_shortcuts") {
+      const pending = pendingApprovals(settings.shortcuts);
+      pending.forEach((shortcut) => { shortcut.privilegedApprovedCommand = shortcut.command.trim(); });
+      demoSettings.shortcuts = structuredClone(settings.shortcuts);
+      return `Approved ${pending.length}`;
+    }
     return command === "test_schedule" ? "Updated 2 light(s). Shell command completed." : "Updated 2 light(s)";
   }
   if (isMobile && ["hide_window", "quit_app"].includes(command)) return;
@@ -607,6 +626,74 @@ function renderSchedules() {
   sizeShellCommandInputs();
 }
 
+const boltIcon = '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg>';
+const lockIcon = '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
+function renderShortcuts() {
+  if (isMobile) return;
+  settings.shortcuts ??= [];
+  const list = $("#shortcut-list");
+  list.classList.toggle("editing", editingShortcuts);
+  $("#edit-shortcuts").textContent = editingShortcuts ? "Done" : "Edit";
+  $("#edit-shortcuts").setAttribute("aria-pressed", String(editingShortcuts));
+  $("#add-shortcut").hidden = !editingShortcuts;
+  const pending = pendingApprovals(settings.shortcuts);
+  $("#shortcut-approval").hidden = !pending.length;
+  $("#shortcut-approval-message").textContent = `${pending.length} root ${pending.length === 1 ? "command needs" : "commands need"} approval`;
+  $("#approve-shortcuts").disabled = Boolean(approvingShortcuts);
+  if (!settings.shortcuts.length) {
+    list.innerHTML = '<div class="empty">No shortcuts yet. Press Edit, then ＋.</div>';
+    return;
+  }
+  list.innerHTML = settings.shortcuts.map((shortcut, index) => editingShortcuts ? `
+    <article class="editor-card shortcut-editor" data-shortcut-index="${index}">
+      <div class="card-title"><input data-shortcut-field="name" value="${escapeHtml(shortcut.name)}" aria-label="Name" spellcheck="false"><button class="remove-button" data-remove-shortcut="${index}">Remove</button></div>
+      <textarea data-shortcut-field="command" placeholder="Shell command" aria-label="Shell command" spellcheck="false">${escapeHtml(shortcut.command)}</textarea>
+      <span class="inline"><label class="check-pill"><input type="checkbox" data-shortcut-field="runAsAdministrator" ${shortcut.runAsAdministrator ? "checked" : ""}>Run as root</label>${shortcut.privilegedApprovedCommand ? `<button class="text-button" data-revoke-shortcut="${escapeHtml(shortcut.id)}">Revoke</button>` : ""}</span>
+    </article>` : `<button class="preset-chip shortcut-button" data-run-shortcut="${escapeHtml(shortcut.id)}" aria-busy="${runningShortcuts.has(shortcut.id)}" title="${escapeHtml(shortcut.command)}">${needsApproval(shortcut) ? lockIcon : shortcut.runAsAdministrator ? boltIcon : ""}<span>${escapeHtml(shortcut.name || "Untitled")}</span></button>`).join("");
+}
+
+// Installs or repairs the helper if needed, then approves every pending root command with one prompt.
+function approveShortcuts() {
+  approvingShortcuts ??= (async () => {
+    renderShortcuts();
+    try {
+      if (!privilegedService.installed || !privilegedService.healthy) {
+        setStatus("Waiting for administrator approval…", "busy");
+        setStatus(await call("install_privileged_service"));
+        await refreshPrivilegedService();
+      }
+      if (!await save()) return false;
+      setStatus("Waiting for administrator approval…", "busy");
+      setStatus(await call("approve_shortcuts"));
+      if (!demoMode) settings.shortcuts = (await call("get_settings")).shortcuts;
+      return true;
+    } catch (error) {
+      setStatus(String(error), "error");
+      return false;
+    } finally {
+      approvingShortcuts = null;
+      renderShortcuts();
+    }
+  })();
+  return approvingShortcuts;
+}
+
+async function runShortcut(id) {
+  const shortcut = settings.shortcuts.find((item) => item.id === id);
+  if (!shortcut || runningShortcuts.has(id)) return;
+  if (needsApproval(shortcut) && !await approveShortcuts()) return;
+  runningShortcuts.add(id);
+  renderShortcuts();
+  setStatus(`Running ${shortcut.name}…`, "busy");
+  try { setStatus(await call("run_shortcut", { id })); }
+  catch (error) { setStatus(String(error), "error"); }
+  finally {
+    runningShortcuts.delete(id);
+    renderShortcuts();
+  }
+}
+
 function sizeShellCommandInput(input) {
   if (!input.getClientRects().length) return;
   input.style.height = "auto";
@@ -731,6 +818,7 @@ function renderAll() {
   renderQuickPresets();
   renderPresets();
   renderSchedules();
+  renderShortcuts();
   renderDevices();
   renderExperimentTargets();
   renderPrivilegedService();
@@ -910,6 +998,33 @@ document.addEventListener("click", async (event) => {
     catch (error) { setStatus(String(error), "error"); }
   }
 
+  const runShortcutButton = event.target.closest("[data-run-shortcut]");
+  if (runShortcutButton) return runShortcut(runShortcutButton.dataset.runShortcut);
+  const removeShortcut = event.target.closest("[data-remove-shortcut]");
+  if (removeShortcut) {
+    const index = Number(removeShortcut.dataset.removeShortcut);
+    const shortcut = settings.shortcuts[index];
+    if (shortcut.privilegedApprovedCommand) {
+      setStatus("Revoking administrator approval…", "busy");
+      try { await call("revoke_shortcut", { id: shortcut.id }); }
+      catch (error) { setStatus(String(error), "error"); return; }
+    }
+    settings.shortcuts.splice(index, 1);
+    await save(); renderShortcuts();
+    return;
+  }
+  const revokeShortcut = event.target.closest("[data-revoke-shortcut]");
+  if (revokeShortcut) {
+    setStatus("Waiting for administrator approval…", "busy");
+    try {
+      setStatus(await call("revoke_shortcut", { id: revokeShortcut.dataset.revokeShortcut }));
+      const shortcut = settings.shortcuts.find((item) => item.id === revokeShortcut.dataset.revokeShortcut);
+      if (shortcut) shortcut.privilegedApprovedCommand = "";
+      renderShortcuts();
+    } catch (error) { setStatus(String(error), "error"); }
+    return;
+  }
+
   const approvePrivileged = event.target.closest("[data-approve-privileged]");
   if (approvePrivileged) {
     if (approvingPrivilegedJob) return;
@@ -1014,6 +1129,15 @@ document.addEventListener("change", async (event) => {
       }
     }
     await save(); renderAll();
+  }
+  const shortcutCard = event.target.closest("[data-shortcut-index]");
+  if (shortcutCard && event.target.dataset.shortcutField) {
+    const shortcut = settings.shortcuts[Number(shortcutCard.dataset.shortcutIndex)];
+    const field = event.target.dataset.shortcutField;
+    shortcut[field] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    if (field === "name" && !shortcut.name.trim()) shortcut.name = "Untitled";
+    await save(); renderShortcuts();
+    return;
   }
   const scheduleCard = event.target.closest("[data-schedule-index]");
   if (scheduleCard && event.target.hasAttribute("data-disable-schedule")) {
@@ -1256,6 +1380,24 @@ $("#add-preset").addEventListener("click", async () => {
   expandedEditorKey = `preset:${settings.presets.length - 1}`;
   await save(); renderAll();
 });
+$("#edit-shortcuts").addEventListener("click", () => {
+  editingShortcuts = !editingShortcuts;
+  renderShortcuts();
+});
+$("#add-shortcut").addEventListener("click", async () => {
+  settings.shortcuts.push(newShortcut(uniqueId()));
+  await save(); renderShortcuts();
+  $("#shortcut-list .shortcut-editor:last-child [data-shortcut-field=\"name\"]")?.select();
+});
+$("#approve-shortcuts").addEventListener("click", () => approveShortcuts());
+makeSortable($("#shortcut-list"), {
+  itemSelector: ".shortcut-editor",
+  ignoreSelector: "input, textarea, button, label",
+  onSort: async (cards) => {
+    settings.shortcuts = cards.map((card) => settings.shortcuts[Number(card.dataset.shortcutIndex)]);
+    await save(); renderShortcuts();
+  },
+});
 $("#add-schedule").addEventListener("click", async () => {
   const fingerprint = await refreshHomeNetwork();
   settings.schedules.push({ id: uniqueId(), name: "New automation", time: "20:00", runOnUse: false, runOnUseAfter: "", enabled: true, lights: [], allLights: true, preset: settings.presets[0]?.name || "", floodlights: "on_home_network", floodlightNetwork: fingerprint, systemAppearance: "unchanged", shellCommand: "", runAsAdministrator: false, privilegedApprovedCommand: "", privilegedApprovedAt: "" });
@@ -1328,8 +1470,10 @@ $("#privileged-service-remove").addEventListener("click", async () => {
       schedule.privilegedApprovedCommand = "";
       schedule.privilegedApprovedAt = "";
     });
+    settings.shortcuts?.forEach((shortcut) => { shortcut.privilegedApprovedCommand = ""; });
     await refreshPrivilegedService();
     renderSchedules();
+    renderShortcuts();
   } catch (error) { setStatus(String(error), "error"); }
 });
 window.addEventListener("focus", refreshEffectState);
@@ -1340,7 +1484,7 @@ refreshEffectState();
 
 $("#quit-button").addEventListener("click", () => call("quit_app"));
 
-const pageOrder = isMobile ? ["controller-page", "settings-page"] : ["controller-page", "automations-page", "settings-page"];
+const pageOrder = isMobile ? ["controller-page", "settings-page"] : ["controller-page", "shortcuts-page", "automations-page", "settings-page"];
 // ⌘← and ⌘→ keep their usual line-start/line-end meaning inside text fields.
 const editsText = (element) => element.matches?.('textarea, [contenteditable], input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"])');
 
@@ -1348,7 +1492,7 @@ document.addEventListener("keydown", (event) => {
   if ($("#remove-schedule-dialog")?.open) return;
   const pageIndex = pageOrder.findIndex((id) => $(`#${id}`).classList.contains("active"));
   const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
-  if (event.metaKey && !event.altKey && !event.ctrlKey && /^[1-3]$/.test(event.key)) {
+  if (event.metaKey && !event.altKey && !event.ctrlKey && /^[1-4]$/.test(event.key)) {
     event.preventDefault();
     if (pageOrder[Number(event.key) - 1]) showPage(pageOrder[Number(event.key) - 1]);
   } else if (event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey && step && !editsText(event.target)) {
@@ -1376,7 +1520,7 @@ await refreshPrivilegedService();
 renderAll();
 const requestedPage = new URLSearchParams(location.search).get("page");
 if (requestedPage === "presets") showPage("settings-page");
-else if ((isMobile ? ["settings"] : ["automations", "settings"]).includes(requestedPage)) showPage(`${requestedPage}-page`);
+else if ((isMobile ? ["settings"] : ["shortcuts", "automations", "settings"]).includes(requestedPage)) showPage(`${requestedPage}-page`);
 
 prepareMobile();
 

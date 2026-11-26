@@ -110,6 +110,12 @@
         </details>
       </section>
 
+      <section id="shortcuts-page" class="page">
+        <div class="page-title"><div><h2>Shortcuts</h2></div><span class="title-actions"><button id="edit-shortcuts" class="secondary compact" aria-pressed="false">Edit</button><button id="add-shortcut" class="round-button" aria-label="Add shortcut" hidden><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></span></div>
+        <div id="shortcut-approval" class="editor-card shortcut-approval" hidden><span id="shortcut-approval-message"></span><button id="approve-shortcuts" class="primary compact">Approve</button></div>
+        <div id="shortcut-list" class="shortcut-list"></div>
+      </section>
+
       <section id="automations-page" class="page">
         <div class="page-title"><div><h2>Automations</h2></div><button id="add-schedule" class="round-button" aria-label="Add automation"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
         <p class="page-copy">Apply a preset, control the floodlights, and optionally run a shell command at the same time.</p>
@@ -182,8 +188,9 @@
 
       <nav aria-label="Main navigation">
         <button class="nav-item active" data-page="controller-page" title="Control (⌘1)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><path d="M2 8h6m1 8h6m1-10h6"/></svg>Control<kbd>⌘1</kbd></button>
-        <button class="nav-item" data-page="automations-page" title="Automations (⌘2)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>Automations<kbd>⌘2</kbd></button>
-        <button class="nav-item" data-page="settings-page" title="Settings (⌘3)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 3-1 3-3 1v4l-2 1 2 1v4l3 1 1 3h6l1-3 3-1v-4l2-1-2-1V7l-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg>Settings<kbd>⌘3</kbd></button>
+        <button class="nav-item" data-page="shortcuts-page" title="Shortcuts (⌘2)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg>Shortcuts<kbd>⌘2</kbd></button>
+        <button class="nav-item" data-page="automations-page" title="Automations (⌘3)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>Automations<kbd>⌘3</kbd></button>
+        <button class="nav-item" data-page="settings-page" title="Settings (⌘4)"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m9 3-1 3-3 1v4l-2 1 2 1v4l3 1 1 3h6l1-3 3-1v-4l2-1-2-1V7l-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg>Settings<kbd>⌘4</kbd></button>
       </nav>
     </main>
     <dialog id="remove-schedule-dialog" class="confirmation-dialog" aria-labelledby="remove-schedule-title" aria-describedby="remove-schedule-message">

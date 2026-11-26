@@ -2,6 +2,8 @@
 mod activity;
 #[cfg(not(target_os = "android"))]
 mod appearance;
+#[cfg(not(target_os = "android"))]
+mod approvals;
 pub mod ble;
 pub mod breathing;
 pub mod command;

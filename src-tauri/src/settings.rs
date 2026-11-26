@@ -120,6 +120,28 @@ impl Schedule {
     }
 }
 
+/// A one-click button on the Shortcuts page. Mac only; never synced.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutButton {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub run_as_administrator: bool,
+    #[serde(default)]
+    pub privileged_approved_command: String,
+}
+
+impl ShortcutButton {
+    pub fn needs_approval(&self) -> bool {
+        self.run_as_administrator
+            && !self.command.trim().is_empty()
+            && self.privileged_approved_command != self.command.trim()
+    }
+}
+
 fn enabled_by_default() -> bool {
     true
 }
@@ -157,6 +179,8 @@ pub struct Settings {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub schedules: Vec<Schedule>,
+    #[serde(default)]
+    pub shortcuts: Vec<ShortcutButton>,
 }
 
 fn default_color() -> String {
@@ -231,6 +255,7 @@ impl Default for Settings {
                 },
             ],
             schedules: Vec::new(),
+            shortcuts: Vec::new(),
         }
     }
 }
@@ -326,6 +351,28 @@ impl Settings {
                     "schedule {:?} references missing preset {:?}",
                     schedule.name, schedule.preset
                 ));
+            }
+        }
+        // Schedules and shortcuts share the helper's job directory, keyed by ID.
+        let mut job_ids = HashSet::new();
+        for id in self.schedules.iter().map(|schedule| &schedule.id) {
+            job_ids.insert(id.as_str());
+        }
+        for shortcut in &self.shortcuts {
+            if shortcut.name.trim().is_empty() {
+                return Err("every shortcut needs a name".into());
+            }
+            if shortcut.id.is_empty()
+                || shortcut.id.len() > 64
+                || !shortcut
+                    .id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            {
+                return Err(format!("shortcut {:?} has an invalid ID", shortcut.name));
+            }
+            if !job_ids.insert(shortcut.id.as_str()) {
+                return Err(format!("shortcut {:?} reuses an ID", shortcut.name));
             }
         }
         Ok(())
@@ -505,6 +552,36 @@ mod tests {
         assert_eq!(load(&path).unwrap().schedules, settings.schedules);
         settings.schedules[0].preset = "missing".into();
         assert!(settings.validate().unwrap_err().contains("missing preset"));
+    }
+
+    #[test]
+    fn shortcuts_round_trip_and_need_approval_only_when_changed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut shortcut: ShortcutButton = serde_json::from_value(serde_json::json!({
+            "id": "low-power", "name": "Low power", "command": "pmset -a lowpowermode 1 ",
+            "runAsAdministrator": true
+        }))
+        .unwrap();
+        assert!(shortcut.needs_approval());
+        shortcut.privileged_approved_command = "pmset -a lowpowermode 1".into();
+        assert!(!shortcut.needs_approval());
+        let mut settings = Settings {
+            shortcuts: vec![shortcut],
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path).unwrap(), settings);
+        settings.shortcuts[0].id = "../x".into();
+        assert!(settings.validate().is_err());
+        settings.shortcuts[0].id = "shared".into();
+        settings.schedules.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "shared", "name": "Shared", "time": "06:00"
+            }))
+            .unwrap(),
+        );
+        assert!(settings.validate().unwrap_err().contains("reuses"));
     }
 
     #[test]

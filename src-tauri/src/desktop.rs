@@ -158,6 +158,27 @@ async fn revoke_privileged_job(
 }
 
 #[tauri::command]
+async fn run_shortcut(id: String, state: tauri::State<'_, SharedState>) -> Result<String, String> {
+    state.run_shortcut(&id).await
+}
+
+#[tauri::command]
+async fn approve_shortcuts(state: tauri::State<'_, SharedState>) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.approve_shortcuts())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn revoke_shortcut(id: String, state: tauri::State<'_, SharedState>) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.revoke_shortcut(&id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn uninstall_privileged_service(
     state: tauri::State<'_, SharedState>,
 ) -> Result<String, String> {
@@ -465,6 +486,9 @@ pub fn run() {
             approve_privileged_job,
             revoke_privileged_job,
             uninstall_privileged_service,
+            run_shortcut,
+            approve_shortcuts,
+            revoke_shortcut,
             set_floodlights,
             network::home_network_status,
             copy_error_details,

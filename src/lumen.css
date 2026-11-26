@@ -128,7 +128,7 @@ nav {
   margin: 14px 16px 0;
   padding: 2px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
   border: 0;
   border-radius: 999px;
@@ -1276,3 +1276,19 @@ input[data-device-field="enabled"],
 }
 
 
+
+/* Shortcuts: one click runs; Edit turns the list into editors. */
+.title-actions { display: flex; align-items: center; gap: 8px; }
+.shortcut-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.shortcut-list.editing { grid-template-columns: 1fr; }
+.shortcut-list .empty { grid-column: 1 / -1; }
+.shortcut-button { display: flex; align-items: center; gap: 6px; }
+.shortcut-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.shortcut-button .ui-icon { width: 12px; height: 12px; color: var(--secondary); }
+.shortcut-button[aria-busy="true"] { color: var(--accent); }
+.shortcut-button[aria-busy="true"]::after { content: ""; flex-shrink: 0; margin-left: auto; width: 10px; height: 10px; border: 2px solid var(--fill-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; }
+.shortcut-approval { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--tile); box-shadow: var(--tile-shadow); font-size: 12px; }
+.shortcut-editor { display: grid; gap: 8px; }
+.shortcut-editor .card-title input { flex: 1; min-width: 0; font-weight: 600; }
+.shortcut-editor textarea { width: 100%; min-height: 44px; font-family: var(--mono); font-size: 11px; resize: vertical; }
+.shortcut-editor .inline { justify-content: flex-start; }

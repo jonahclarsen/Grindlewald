@@ -35,7 +35,8 @@ Grindlewald is a small macOS menu-bar app for controlling Govee Bluetooth lights
 - Optional trusted shell commands run normally or unattended through one root-owned helper after per-command macOS approval
 - Local Unix-socket CLI, so terminal commands benefit from the menu app's warm BLE connections too
 - A native macOS look that follows Light and Dark appearance and your accent color
-- Keyboard navigation with ⌘1 for Control, ⌘2 for Automations, ⌘3 for Settings, ⌘← and ⌘→ for the previous and next page, and Escape to dismiss
+- A Shortcuts page of one-click buttons for shell commands, including root commands approved once through the privileged helper
+- Keyboard navigation with ⌘1 for Control, ⌘2 for Shortcuts, ⌘3 for Automations, ⌘4 for Settings, ⌘← and ⌘→ for the previous and next page, and Escape to dismiss
 
 ## Setup
 
@@ -141,6 +142,12 @@ The helper runs approved commands through `/bin/zsh -lc` with a clean root envir
 The unattended sudo policy is limited to the helper plus an argument expression equivalent to `run <letters-numbers-or-hyphens>`. Installation, approval, revocation, and removal are not covered by that policy and always go back through macOS authorization. Any process already running as your macOS account could request execution of a known approved job ID, but it cannot change that job or supply new root command text; revoke jobs whose fixed operation would be unsafe to trigger unexpectedly.
 
 The installer verifies the copied executable against the app's SHA-256 digest, then applies and verifies a standalone ad-hoc signature before installing the root-owned helper. The app keeps its Developer ID signature. A root-owned receipt records both digests so update checks remain accurate after re-signing. Helpers installed before this receipt was introduced need a one-time repair through **Privileged automations**; existing job approvals are preserved.
+
+## Shortcuts
+
+**Shortcuts** (⌘2) is a page of one-click buttons, each running one shell command through `/bin/zsh -lc`. Choose **Edit** to add, rename, reorder (drag), or remove them. Hover a button to see its command.
+
+Check **Run as root** for commands that need administrator rights, such as `pmset`. These run through the same root-owned helper as unattended automations, so after approval they keep working across restarts and macOS updates without asking for a password again. Unlike macOS Shortcuts, approval is not per run: **Approve** approves every pending root command with one macOS prompt and installs the helper first if needed. Clicking an unapproved button does the same and then runs it. A lock marks unapproved buttons. Editing a command requires approval again; **Revoke** removes one approval. Shortcuts are local to the Mac and never synced.
 
 ## Start automatically in live development mode
 
