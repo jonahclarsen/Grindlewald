@@ -53,6 +53,9 @@ export function lightPickerHtml(devices, deselected, escapeHtml) {
 // Press a light to flip it, then drag across others to give them the same state.
 export function bindLightPicker(container, onChange) {
   let paintState = null;
+  // Set by a pointer press so its follow-up click isn't treated as a keyboard press.
+  // (Some browsers report touch clicks with detail 0, like keyboard ones.)
+  let pointerPressed = false;
   const toggleAt = (x, y) => document.elementFromPoint(x, y)?.closest("[data-light]");
   const paint = (toggle) => {
     if (!toggle || !container.contains(toggle) || toggle.getAttribute("aria-pressed") === String(paintState)) return;
@@ -63,6 +66,7 @@ export function bindLightPicker(container, onChange) {
     const toggle = event.target.closest("[data-light]");
     if (!toggle || event.button !== 0) return;
     event.preventDefault();
+    pointerPressed = true;
     paintState = toggle.getAttribute("aria-pressed") !== "true";
     container.setPointerCapture(event.pointerId);
     paint(toggle);
@@ -73,9 +77,11 @@ export function bindLightPicker(container, onChange) {
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     container.addEventListener(type, () => { paintState = null; });
   }
+  container.addEventListener("keydown", () => { pointerPressed = false; });
   // Keyboard presses arrive as clicks with no pointer behind them.
   container.addEventListener("click", (event) => {
     const toggle = event.target.closest("[data-light]");
+    if (pointerPressed) { pointerPressed = false; return; }
     if (!toggle || event.detail !== 0) return;
     paintState = toggle.getAttribute("aria-pressed") !== "true";
     paint(toggle);
