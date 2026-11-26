@@ -255,10 +255,16 @@ Bluetooth addresses differ between macOS and Android. On the new device, choose
 **Discover**: a light synced from the other device pairs automatically, matched by the
 address suffix Govee lights advertise in their name (`…_1A2B`). **Pair [light name]** pairs
 manually. A light added separately on each device merges into one, keeping its custom
-name. Each platform's address stays associated with that shared light. Android Floodlights buttons send
-requests to the paired Mac, which must be running Grindlewald; they use the Mac's
-existing floodlight script and credentials. Hidden-window relay polling requires macOS 14 or newer; on older Macs keep the window open. Requests expire rather than running later
-when the Mac comes back online.
+name. Each platform's address stays associated with that shared light. Floodlights are TP-Link Kasa plugs
+with "light" in their name. Sign in to TP-Link under Settings on Android and its
+Floodlights buttons control them directly through TP-Link's cloud, with no Mac needed;
+**On for 5m** sets the plug's own countdown, so it turns off even if Android suspends the
+app. The account stays in the app's no-backup storage on that phone and never syncs.
+Without that sign-in, the buttons relay to the paired Mac, which must be running
+Grindlewald and uses its floodlight script and credentials. Hidden-window relay polling
+requires macOS 14 or newer; on older Macs keep the window open. Relayed requests expire
+rather than running later when the Mac comes back online. **Cancel** in the status bar
+stops waiting, and withdraws a relayed request the Mac hasn't taken yet.
 
 The pairing code grants access to that room, including its configured Bluetooth
 identifiers and floodlight controls. Transport uses HTTPS; the relay is not end-to-end

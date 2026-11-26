@@ -118,15 +118,18 @@ export async function createSync({platform, getSettings, applySettings, executeF
     renamePreset(oldName,name){if(token)model.renamePreset(oldName,name);},
     async observe(discovered){if(!token)return;await capture();if(model.observe(discovered)){await apply();exchange();}},
     async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));await persist();onChange();exchange();},
-    async floodlights(args){
+    async floodlights(args, signal){
+      if(!token)throw Error('Sign in to TP-Link in Settings');
       const id=crypto.randomUUID();
       await request('control',{type:'request',id,on:args.on,offAfterSeconds:args.offAfterSeconds ?? null});
-      for(let attempt=0;attempt<20;attempt++) {
+      signal?.addEventListener('abort',()=>request('control',{type:'cancel',id}).catch(()=>{}));
+      for(let attempt=0;attempt<20 && !signal?.aborted;attempt++) {
         await new Promise(resolve=>setTimeout(resolve,1000));
         const {result}=await request('control',{type:'status',id});
         if(result){if(!result.ok)throw Error(result.message);return result.message;}
       }
-      throw Error('Mac unavailable. Open Grindlewald on your paired Mac and try again.');
+      if(signal?.aborted)throw signal.reason;
+      throw Error('No answer from your Mac. Sign in to TP-Link in Settings to control floodlights from this phone.');
     },
   };
 }

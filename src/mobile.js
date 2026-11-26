@@ -23,3 +23,29 @@ export function startMobileUpdates(invoke) {
   check(false);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) check(false); });
 }
+let floodlightEmail = '';
+/** True when this phone controls the floodlights through TP-Link itself instead of the paired Mac. */
+export const hasFloodlightAccount = () => Boolean(floodlightEmail);
+export function startFloodlightAccount(invoke) {
+  const form = document.querySelector('#tplink-form');
+  const status = document.querySelector('#tplink-status');
+  const signOut = document.querySelector('#tplink-sign-out');
+  const show = email => {
+    floodlightEmail = email;
+    status.textContent = email || 'For floodlights';
+    form.hidden = Boolean(email); signOut.hidden = !email;
+  };
+  const account = async (request, busy) => {
+    if (busy) status.textContent = busy;
+    try { show(await invoke('floodlight_account', {request})); }
+    catch (error) { show(floodlightEmail); status.textContent = String(error); }
+  };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const password = document.querySelector('#tplink-password');
+    await account({email: document.querySelector('#tplink-email').value, password: password.value}, 'Signing in…');
+    if (floodlightEmail) password.value = '';
+  };
+  signOut.onclick = () => account({signOut: true});
+  account({});
+}

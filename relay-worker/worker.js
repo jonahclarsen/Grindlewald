@@ -37,6 +37,11 @@ export class Room {
         await storage.put('control',{...command,result:{ok:input.ok,message:input.message.slice(0,500)}});
         return json({ok:true});
       }
+      if(input.type==='cancel') {
+        // Withdraw a request the Mac hasn't taken yet.
+        if(command?.id===input.id && !command.claimed)await storage.delete('control');
+        return json({ok:true});
+      }
       if(input.type==='status')return json({result:command?.id===input.id ? command.result ?? null : null});
       return json({error:'Unknown command'},400);
     });

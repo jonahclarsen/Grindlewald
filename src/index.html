@@ -164,12 +164,21 @@
             <div class="card-title"><span><strong id="mobile-version"></strong><small id="mobile-update-status" class="muted" role="status"></small></span></div>
             <div class="sync-body"><div class="sync-actions"><button id="mobile-permissions" class="secondary compact">Permissions</button><button id="mobile-update" class="primary compact">Check for updates</button></div></div>
           </div>
+          <div class="editor-card sync-card">
+            <div class="card-title"><span><strong>TP-Link</strong><small id="tplink-status" class="muted" role="status">For floodlights</small></span><button id="tplink-sign-out" class="remove-button" hidden>Sign out</button></div>
+            <form id="tplink-form" class="sync-body">
+              <input id="tplink-email" class="text-input" type="email" autocomplete="username" spellcheck="false" aria-label="TP-Link email" placeholder="Email" required>
+              <input id="tplink-password" class="text-input" type="password" autocomplete="current-password" aria-label="TP-Link password" placeholder="Password" required>
+              <div class="sync-actions"><button id="tplink-sign-in" class="primary compact">Sign in</button></div>
+            </form>
+          </div>
         </div>
         <button id="quit-button" class="danger-link">Quit Grindlewald</button>
       </section>
 
       <div class="controller-status eyebrow">
         <span id="status-dot" aria-hidden="true"></span><span id="status" role="status">Ready</span>
+        <button id="status-cancel" class="status-details" hidden>Cancel</button>
         <button id="error-open" class="status-details" aria-label="View error details" aria-expanded="false" aria-controls="error-panel" hidden><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v2"/></svg><span>Details</span></button>
       </div>
 

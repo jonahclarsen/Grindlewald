@@ -61,6 +61,21 @@ async fn connection_status(state: tauri::State<'_, SharedState>) -> Result<crate
 async fn disconnect_lights(state: tauri::State<'_, SharedState>) -> Result<String, String> { state.disconnect().await }
 #[tauri::command]
 fn copy_error_details(text: String) -> Result<(), String> { mobile_call("copy", &text).map(|_| ()) }
+/// Calls a TP-Link bridge method, which answers {"ok":…,"message":…}.
+async fn tplink_call(method: &'static str, request: serde_json::Value) -> Result<String, String> {
+    let reply = tauri::async_runtime::spawn_blocking(move || mobile_call(method, &request.to_string()))
+        .await.map_err(|e| e.to_string())??;
+    let reply: serde_json::Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
+    let message = reply["message"].as_str().unwrap_or_default().to_string();
+    if reply["ok"].as_bool() == Some(true) { Ok(message) } else { Err(message) }
+}
+/// Signs in (email, password), signs out (signOut), or reports the TP-Link account ({}).
+#[tauri::command]
+async fn floodlight_account(request: serde_json::Value) -> Result<String, String> { tplink_call("tplink", request).await }
+#[tauri::command]
+async fn set_floodlights(on: bool, off_after_seconds: Option<u64>) -> Result<String, String> {
+    tplink_call("floodlights", serde_json::json!({"on": on, "offAfterSeconds": off_after_seconds})).await
+}
 #[tauri::mobile_entry_point]
 pub fn run() {
     tauri::Builder::default().setup(|app| {
@@ -82,6 +97,7 @@ pub fn run() {
         app.manage(state); Ok(())
     }).invoke_handler(tauri::generate_handler![get_settings, save_settings, discover_lights,
         execute_control, connection_status, disconnect_lights, mobile_action, copy_error_details,
+        floodlight_account, set_floodlights,
         crate::sync_store::load_sync_state, crate::sync_store::save_sync_state])
       .run(tauri::generate_context!()).expect("error running Grindlewald");
 }

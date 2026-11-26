@@ -1,5 +1,5 @@
 import { createSync } from "./sync.js";
-import { isMobile, prepareMobile, startMobileUpdates } from "./mobile.js";
+import { hasFloodlightAccount, isMobile, prepareMobile, startFloodlightAccount, startMobileUpdates } from "./mobile.js";
 import { lightsToMeasure, measureStepIntervalCommand } from "./step-interval.js";
 import { whitePositionFromHex, kelvinAtPosition, whiteAtPosition, whitePlaybackPosition, whiteSeekPhase, whiteBreathingCommand, whiteBreathingPaceCommand, whiteBreathingAvailable } from "./white-breathing.js";
 import { createControlQueue } from "./controls.js";
@@ -293,7 +293,8 @@ async function call(command, args = {}) {
 }
 
 async function callBackend(command, args = {}) {
-  if (isMobile && command === "set_floodlights") return sync.floodlights(args);
+  if (isMobile && command === "set_floodlights" && !hasFloodlightAccount()) return sync.floodlights(args, args.signal);
+  if (command === "set_floodlights") args = { on: args.on, offAfterSeconds: args.offAfterSeconds };
   if (demoMode) {
     if (command === "connection_status") return { effectActive: demoEffectActive };
     if (command === "execute_control" && !["seek_breathing", "set_white_breathing_pace"].includes(args.command.command)) {
@@ -926,11 +927,20 @@ document.addEventListener("click", async (event) => {
     const offAfterSeconds = Number(floodlightButton.dataset.floodlightsOffAfter) || null;
     setFloodlightsBusy(true);
     setStatus(`Turning floodlights ${on ? "on" : "off"}…`, "busy");
+    // Cancel stops waiting; a relayed request is withdrawn if the Mac hasn't taken it yet.
+    const cancel = new AbortController();
+    const cancelled = new Promise((_, reject) => cancel.signal.addEventListener("abort", () => reject(cancel.signal.reason)));
+    const cancelButton = $("#status-cancel");
+    cancelButton.onclick = () => cancel.abort(Error("Cancelled"));
+    cancelButton.hidden = false;
     try {
-      setStatus(await call("set_floodlights", { on, offAfterSeconds }));
+      setStatus(await Promise.race([call("set_floodlights", { on, offAfterSeconds, signal: cancel.signal }), cancelled]));
     } catch (error) {
-      setStatus(String(error), "error");
+      if (cancel.signal.aborted) setStatus("Cancelled");
+      else setStatus(String(error.message ?? error), "error");
     } finally {
+      cancelButton.hidden = true;
+      cancelButton.onclick = null;
       setFloodlightsBusy(false);
     }
   }
@@ -1533,4 +1543,4 @@ sync = await createSync({
   executeFloodlights:({on,offAfterSeconds})=>call("set_floodlights",{on,offAfterSeconds}),
 });
 
-if (isMobile && !demoMode) startMobileUpdates(invoke);
+if (isMobile && !demoMode) { startMobileUpdates(invoke); startFloodlightAccount(invoke); }

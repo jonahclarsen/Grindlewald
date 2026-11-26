@@ -88,6 +88,12 @@ try {
     if(command==='discover_lights')return [{name:'Govee H6005',identifier:'SYNTHETIC-ANDROID'}];
     if(command==='home_network_status')return {fingerprint:null};
     if(command==='mobile_action')return args.action==='version'?'0.1.0':'';
+    if(command==='floodlight_account'){
+     if(args.request.email)localStorage.setItem('tplink',args.request.email);
+     if(args.request.signOut)localStorage.removeItem('tplink');
+     return localStorage.getItem('tplink')??'';
+    }
+    if(command==='set_floodlights'&&mobile)return new Promise(()=>{});
     if(command==='set_floodlights'){localStorage.setItem('floodlight-request',JSON.stringify(args));return 'Floodlights on';}
     return 'Updated';
    }},event:{listen:async()=>()=>{}}};
@@ -130,5 +136,18 @@ try {
  await phone.locator('[data-floodlights="true"]:not([data-floodlights-off-after])').click();
  await phone.locator('#status').filter({hasText:/^Floodlights on$/}).waitFor({timeout:30000});
  assert.equal(await desktop.evaluate(()=>JSON.parse(localStorage.getItem('floodlight-request')).on),true);
+ // Signed in to TP-Link, the phone controls floodlights itself; Cancel stops waiting.
+ await phone.locator('[data-page="settings-page"]').click();
+ await phone.locator('#tplink-email').fill('ci@example.com');
+ await phone.locator('#tplink-password').fill('synthetic');
+ await phone.locator('#tplink-sign-in').click();
+ await phone.locator('#tplink-status').filter({hasText:'ci@example.com'}).waitFor();
+ assert.equal(await phone.locator('#tplink-form').isHidden(),true);
+ await phone.locator('[data-page="controller-page"]').click();
+ await phone.locator('[data-floodlights="false"]').click();
+ await phone.locator('#status-cancel').click();
+ await phone.locator('#status').filter({hasText:/^Cancelled$/}).waitFor();
+ assert.equal(await phone.locator('#status-cancel').isHidden(),true);
+ assert.equal(await phone.locator('[data-floodlights="false"]').isEnabled(),true);
  for(const context of contexts)await context.close();
 } finally {await browser.close();server.close();}

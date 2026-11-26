@@ -44,6 +44,14 @@ object MobileBridge {
         }
         return ""
     }
+    /** TP-Link calls return {"ok":…,"message":…} because JNI exceptions lose their message. */
+    private fun reply(work: () -> String): String = try {
+        org.json.JSONObject().put("ok", true).put("message", work()).toString()
+    } catch (error: Exception) {
+        org.json.JSONObject().put("ok", false).put("message", error.message ?: error.toString()).toString()
+    }
+    @JvmStatic fun tplink(request: String): String = reply { TPLinkCloud.account(activity, org.json.JSONObject(request)) }
+    @JvmStatic fun floodlights(request: String): String = reply { TPLinkCloud.floodlights(activity, org.json.JSONObject(request)) }
     @JvmStatic fun copy(text: String): String {
         activity.runOnUiThread {
             (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Grindlewald", text))

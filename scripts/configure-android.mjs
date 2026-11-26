@@ -4,7 +4,7 @@ import { join } from 'node:path';
 const root = 'src-tauri/gen/android';
 const main = `${root}/app/src/main`;
 const java = `${main}/java/com/jonahclarsen/grindlewald`;
-for (const file of ['MobileBridge.kt', 'GrindlewaldUpdater.kt']) cpSync(`android/${file}`, `${java}/${file}`);
+for (const file of ['MobileBridge.kt', 'GrindlewaldUpdater.kt', 'TPLinkCloud.kt']) cpSync(`android/${file}`, `${java}/${file}`);
 const activity = `${java}/MainActivity.kt`;
 let text = readFileSync(activity, 'utf8');
 text = text.replace('super.onCreate(savedInstanceState)', `super.onCreate(savedInstanceState)
