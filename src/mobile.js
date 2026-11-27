@@ -26,7 +26,7 @@ export function startMobileUpdates(invoke) {
 let floodlightEmail = '';
 /** True when this phone controls the floodlights through TP-Link itself instead of the paired Mac. */
 export const hasFloodlightAccount = () => Boolean(floodlightEmail);
-export function startFloodlightAccount(invoke) {
+export function startFloodlightAccount(invoke, share = async () => {}) {
   const form = document.querySelector('#tplink-form');
   const status = document.querySelector('#tplink-status');
   const signOut = document.querySelector('#tplink-sign-out');
@@ -37,15 +37,22 @@ export function startFloodlightAccount(invoke) {
   };
   const account = async (request, busy) => {
     if (busy) status.textContent = busy;
-    try { show(await invoke('floodlight_account', {request})); }
-    catch (error) { show(floodlightEmail); status.textContent = String(error); }
+    try { show(await invoke('floodlight_account', {request})); return true; }
+    catch (error) { show(floodlightEmail); status.textContent = String(error); return false; }
   };
   form.onsubmit = async event => {
     event.preventDefault();
     const password = document.querySelector('#tplink-password');
-    await account({email: document.querySelector('#tplink-email').value, password: password.value}, 'Signing in…');
-    if (floodlightEmail) password.value = '';
+    const login = {email: document.querySelector('#tplink-email').value.trim(), password: password.value};
+    if (await account(login, 'Signing in…')) {
+      password.value = '';
+      share(login).catch(() => {}); // Paired devices pick this login up.
+    }
   };
   signOut.onclick = () => account({signOut: true});
-  account({});
+  const ready = account({});
+  return {
+    signedIn: hasFloodlightAccount,
+    async signIn(login) { await ready; if (!floodlightEmail) await account(login, 'Signing in…'); },
+  };
 }

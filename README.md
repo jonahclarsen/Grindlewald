@@ -259,7 +259,11 @@ name. Each platform's address stays associated with that shared light. Floodligh
 with "light" in their name. Sign in to TP-Link under Settings on Android and its
 Floodlights buttons control them directly through TP-Link's cloud, with no Mac needed;
 **On for 5m** sets the plug's own countdown, so it turns off even if Android suspends the
-app. The account stays in the app's no-backup storage on that phone and never syncs.
+app. Paired phones sign in by themselves: the Mac shares the login its floodlight
+script uses (from that script's `set_floodlight` module), and signing in on a phone
+shares that login too. It is stored in the relay encrypted with a key derived from the
+pairing code (so, like the rest of the relay, not hidden from whoever runs the relay
+worker), and on the phone in the app's no-backup storage.
 Without that sign-in, the buttons relay to the paired Mac, which must be running
 Grindlewald and uses its floodlight script and credentials. Hidden-window relay polling
 requires macOS 14 or newer; on older Macs keep the window open. Relayed requests expire

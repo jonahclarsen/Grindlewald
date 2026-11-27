@@ -94,6 +94,7 @@ try {
      return localStorage.getItem('tplink')??'';
     }
     if(command==='set_floodlights'&&mobile)return new Promise(()=>{});
+    if(command==='floodlight_credentials')return localStorage.getItem('share-login')?{email:'ci@example.com',password:'synthetic'}:null;
     if(command==='set_floodlights'){localStorage.setItem('floodlight-request',JSON.stringify(args));return 'Floodlights on';}
     return 'Updated';
    }},event:{listen:async()=>()=>{}}};
@@ -136,12 +137,13 @@ try {
  await phone.locator('[data-floodlights="true"]:not([data-floodlights-off-after])').click();
  await phone.locator('#status').filter({hasText:/^Floodlights on$/}).waitFor({timeout:30000});
  assert.equal(await desktop.evaluate(()=>JSON.parse(localStorage.getItem('floodlight-request')).on),true);
- // Signed in to TP-Link, the phone controls floodlights itself; Cancel stops waiting.
+ // A Mac launch with a TP-Link login shares it; the phone signs in by itself.
+ await desktop.evaluate(()=>localStorage.setItem('share-login','1'));
+ await desktop.reload();
  await phone.locator('[data-page="settings-page"]').click();
- await phone.locator('#tplink-email').fill('ci@example.com');
- await phone.locator('#tplink-password').fill('synthetic');
- await phone.locator('#tplink-sign-in').click();
- await phone.locator('#tplink-status').filter({hasText:'ci@example.com'}).waitFor();
+ await phone.locator('#tplink-status').filter({hasText:'ci@example.com'}).waitFor({timeout:30000});
+ assert.equal(await phone.evaluate(()=>localStorage.getItem('tplink')),'ci@example.com');
+ // Signed in, the phone controls floodlights itself; Cancel stops waiting.
  assert.equal(await phone.locator('#tplink-form').isHidden(),true);
  await phone.locator('[data-page="controller-page"]').click();
  await phone.locator('[data-floodlights="false"]').click();

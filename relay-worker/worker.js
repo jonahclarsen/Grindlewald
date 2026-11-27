@@ -46,8 +46,21 @@ export class Room {
       return json({error:'Unknown command'},400);
     });
   }
+  // The floodlights' TP-Link login, encrypted by the devices; this only stores it.
+  async account(request) {
+    const text=await request.text();
+    if(text.length>4000)return json({error:'Too large'},413);
+    let input;try{input=JSON.parse(text);}catch{return json({error:'Invalid JSON'},400);}
+    if(input.type==='get')return json({blob:await this.storage.get('account') ?? null});
+    if(input.type==='put' && typeof input.blob==='string' && /^[A-Za-z0-9+/=.]{1,3000}$/.test(input.blob)) {
+      await this.storage.put('account',input.blob);
+      return json({ok:true});
+    }
+    return json({error:'Invalid account'},400);
+  }
   async fetch(request) {
     if(new URL(request.url).pathname==='/control')return this.control(request);
+    if(new URL(request.url).pathname==='/account')return this.account(request);
     if (Number(request.headers.get('Content-Length')) > 256000) return json({error:'Too large'},413);
     const text = await request.text();
     if (text.length > 256000) return json({error:'Too large'},413);
@@ -65,7 +78,7 @@ export class Room {
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null,{headers});
-    if (request.method !== 'POST' || !['/sync','/control'].includes(new URL(request.url).pathname)) return json({error:'Not found'},404);
+    if (request.method !== 'POST' || !['/sync','/control','/account'].includes(new URL(request.url).pathname)) return json({error:'Not found'},404);
     const token=request.headers.get('Authorization')?.replace(/^Bearer /,'');
     if (!/^[a-f0-9]{64}$/.test(token ?? '')) return json({error:'Pairing code required'},401);
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));

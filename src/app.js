@@ -1534,6 +1534,10 @@ else if ((isMobile ? ["settings"] : ["shortcuts", "automations", "settings"]).in
 
 prepareMobile();
 
+// On Android, the TP-Link card works before sync starts, and sync can sign it in.
+const floodlightLogin = isMobile && !demoMode ? startFloodlightAccount(invoke, (login) => sync?.shareAccount(login)) : null;
+if (isMobile && !demoMode) startMobileUpdates(invoke);
+
 sync = await createSync({
   platform:isMobile ? "android" : "macos",
   ...(!demoMode ? {load:()=>call("load_sync_state"),store:value=>call("save_sync_state",{value}),copy:text=>call("copy_error_details",{text})} : {}),
@@ -1541,6 +1545,5 @@ sync = await createSync({
   applySettings:async next=>{settings=next; await call("save_settings", {settings});},
   onChange:()=>renderAll(),
   executeFloodlights:({on,offAfterSeconds})=>call("set_floodlights",{on,offAfterSeconds}),
+  floodlightAccount:demoMode ? {} : isMobile ? floodlightLogin : {load:()=>call("floodlight_credentials")},
 });
-
-if (isMobile && !demoMode) { startMobileUpdates(invoke); startFloodlightAccount(invoke); }

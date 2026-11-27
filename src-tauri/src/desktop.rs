@@ -237,6 +237,33 @@ fn floodlight_python_path() -> PathBuf {
     PathBuf::from("python3")
 }
 
+/// The TP-Link login the floodlight script already uses, so other devices
+/// can control the floodlights without signing in again. Read from the
+/// `set_floodlight` module the script imports; None when it can't be found.
+#[tauri::command]
+async fn floodlight_credentials() -> Result<Option<serde_json::Value>, String> {
+    let script = floodlight_script_path()?;
+    let output = tokio::process::Command::new(floodlight_python_path())
+        .current_dir(script.parent().unwrap_or(&script))
+        .args([
+            "-c",
+            "import json, sys; sys.path.insert(0, '.'); import set_floodlight as s; \
+             print(json.dumps({'email': s.username, 'password': s.password}))",
+        ])
+        .output()
+        .await
+        .map_err(|error| format!("Could not read the TP-Link login: {error}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .last()
+        .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|value| value["email"].is_string() && value["password"].is_string()))
+}
+
 /// Bumped on every floodlight command so a pending timed auto-off is cancelled
 /// by any later manual or scheduled floodlight change.
 static FLOODLIGHT_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -490,6 +517,7 @@ pub fn run() {
             approve_shortcuts,
             revoke_shortcut,
             set_floodlights,
+            floodlight_credentials,
             network::home_network_status,
             copy_error_details,
             hide_window,

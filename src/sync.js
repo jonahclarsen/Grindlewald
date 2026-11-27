@@ -1,7 +1,26 @@
 import {SyncModel} from './sync-model.js';
 const ENDPOINT = 'https://grindlewald-sync.cf-cuicn.workers.dev';
 const STORAGE = 'grindlewald-sync-v1';
+// The TP-Link login travels encrypted with a key only paired devices can derive.
+async function accountKey(token) {
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`grindlewald-tplink:${token}`));
+  return crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['encrypt','decrypt']);
+}
+const base64=bytes=>btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const unbase64=text=>Uint8Array.from(atob(text),c=>c.charCodeAt(0));
+export async function sealAccount(token, account) {
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},await accountKey(token),new TextEncoder().encode(JSON.stringify(account)));
+  return `${base64(iv)}.${base64(data)}`;
+}
+export async function openAccount(token, blob) {
+  const [iv,data]=blob.split('.').map(unbase64);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv},await accountKey(token),data)));
+}
+
 export async function createSync({platform, getSettings, applySettings, executeFloodlights, onChange = () => {},
+  // Mac: () => its TP-Link login or null. Android: whether it's signed in, and how to sign in.
+  floodlightAccount = {},
   load = async () => JSON.parse(localStorage.getItem(STORAGE) ?? 'null'),
   store = async value => localStorage.setItem(STORAGE, JSON.stringify(value)),
   copy = text => navigator.clipboard.writeText(text),
@@ -9,7 +28,7 @@ export async function createSync({platform, getSettings, applySettings, executeF
   const stored = await load() ?? {};
   let token=stored.token ?? '';
   let model=new SyncModel(platform, stored.model);
-  let busy=false, timer;
+  let busy=false, timer, accountShared=false, accountTried=null;
   const status=document.querySelector('#sync-status');
   const code=document.querySelector('#sync-code');
   let saveChain=Promise.resolve(), lastPersisted=JSON.stringify(stored);
@@ -48,6 +67,7 @@ export async function createSync({platform, getSettings, applySettings, executeF
       await capture(); // Preserve edits made during the network request.
       model.merge(result.records); await apply();
       status.textContent='Synced';
+      await syncAccount().catch(()=>{});
       if (platform==='macos') {
         const {command}=await request('control',{type:'claim'});
         if (command) {
@@ -59,6 +79,21 @@ export async function createSync({platform, getSettings, applySettings, executeF
       }
     } catch { status.textContent='Offline · changes saved here'; }
     finally { busy=false; }
+  }
+  async function syncAccount() {
+    if (platform==='macos') {
+      // Share the Mac's login once per launch, unless a device already shared one.
+      if (accountShared || !floodlightAccount.load) return;
+      const {blob}=await request('account',{type:'get'});
+      const account=blob ? null : await floodlightAccount.load();
+      if (account) await request('account',{type:'put',blob:await sealAccount(token,account)});
+      accountShared=true;
+    } else if (floodlightAccount.signIn && !floodlightAccount.signedIn()) {
+      const {blob}=await request('account',{type:'get'});
+      if (!blob || blob===accountTried) return;
+      accountTried=blob; // Don't retry a login that failed until it changes.
+      await floodlightAccount.signIn(await openAccount(token,blob));
+    }
   }
   async function connect(join) {
     if (busy) return;
@@ -115,6 +150,9 @@ export async function createSync({platform, getSettings, applySettings, executeF
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) exchange();});
   return {
     changed(){return capture();},
+    async shareAccount(account){
+      if(token)await request('account',{type:'put',blob:await sealAccount(token,account)});
+    },
     renamePreset(oldName,name){if(token)model.renamePreset(oldName,name);},
     async observe(discovered){if(!token)return;await capture();if(model.observe(discovered)){await apply();exchange();}},
     async pair(identifier,replacement){await applySettings(model.pair(getSettings(),identifier,replacement));await persist();onChange();exchange();},
